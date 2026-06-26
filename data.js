@@ -1,108 +1,76 @@
-/* DREADNOUGHT — game content & balance data.
- * Pure data (no logic): game.js interprets `kind`/reward tables.
- * Tune one number at a time (game-design-system §0.6 / §9.5). */
+/* DREADNOUGHT v2 — game content & balance data (deduction-salvage roguelite).
+ * Pure data (no logic): game.js interprets ids/footprints/shop effects.
+ * Tune one number at a time (game-design-system §0.6 / §9.5). Numbers frozen in thresholds.md. */
 (function (root) {
   "use strict";
 
   var CFG = {
-    maxHull: 100, maxOxygen: 100, maxSanity: 100,
-    startHull: 100, startOxygen: 100, startSanity: 100,
-    powerPerTurn: 3,
-    handSize: 5,
-    bands: 8,            // band 8 = the floor / the source
-    descendOxygen: 8,    // O2 cost to dive a band
-    holdOxygen: 3,       // O2 cost to "hold position" (end cycle, redraw, refill power)
-    lowSanity: 40,       // below this the scope shows phantoms
-    phantomChance: 0.5,  // chance a low-sanity band spawns a phantom contact
+    startHull: 100, baseMaxHull: 100,
+    startSanity: 100, baseMaxSanity: 100,
+    baseOxygen: 100,
+    probeCost: 2,            // oxygen per MANUAL probe (flood-filled cells are free)
+    startMoney: 0,
+    baseCorruptThreshold: 40,// sanity below this -> scope corruption (raisable by upgrade to 25)
+    surfaceRepair: 0.5,      // fraction of missing hull/sanity recovered on surfacing
+    handSize: 0,             // (legacy field; unused)
   };
 
-  // ---- Card library. target: 'none' (self/board) or 'contact'. ----
-  var CARDS = {
-    ping:        { id:"ping",        name:"Sonar Ping",        cost:1, kind:"ping",        target:"none",    cat:"read",  desc:"Classify every contact by signature." },
-    scan:        { id:"scan",        name:"Deep Scan",         cost:1, kind:"scan",        target:"contact", cat:"read",  desc:"Fully identify one contact and its threat." },
-    investigate: { id:"investigate", name:"Investigate",       cost:2, kind:"investigate", target:"contact", cat:"act",   desc:"Resolve a contact for salvage. Creatures retaliate." },
-    evade:       { id:"evade",       name:"Evasive Trim",      cost:1, kind:"evade",       target:"contact", cat:"act",   desc:"A creature loses our scent. It will not strike." },
-    brace:       { id:"brace",       name:"Brace Hull",        cost:1, kind:"hull",        target:"none",    cat:"fix",   amount:18, desc:"Reinforce the hull. +18 HULL." },
-    vent:        { id:"vent",        name:"Purge Scrubbers",   cost:1, kind:"oxygen",      target:"none",    cat:"fix",   amount:20, desc:"Restore breathable air. +20 O2." },
-    steady:      { id:"steady",      name:"Steady the Crew",   cost:1, kind:"sanity",      target:"none",    cat:"fix",   amount:18, desc:"Calm the crew. +18 MIND." },
-
-    // ---- salvageable / reward cards ----
-    plating:     { id:"plating",     name:"Reinforced Plating",cost:1, kind:"hull",        target:"none",    cat:"fix",   amount:34, desc:"Welded scrap armour. +34 HULL." },
-    o2cache:     { id:"o2cache",     name:"Oxygen Cache",      cost:1, kind:"oxygen",      target:"none",    cat:"fix",   amount:40, desc:"A looted air reserve. +40 O2." },
-    torpedo:     { id:"torpedo",     name:"Pressure Torpedo",  cost:2, kind:"kill",        target:"contact", cat:"act",   desc:"Destroy a creature contact outright." },
-    resonance:   { id:"resonance",   name:"Resonance",         cost:2, kind:"reveal",      target:"none",    cat:"read",  sanityCost:8, desc:"Identify ALL contacts. −8 MIND." },
-    charts:      { id:"charts",      name:"Old Charts",        cost:0, kind:"freedescend", target:"none",    cat:"act",   once:true, desc:"Descend with no oxygen cost. One use." },
-    focus:       { id:"focus",       name:"Adrenaline",        cost:0, kind:"power",       target:"none",    cat:"act",   amount:2, desc:"+2 PWR this cycle." },
-    knowledge:   { id:"knowledge",   name:"Forbidden Knowledge",cost:1,kind:"reveal",      target:"none",    cat:"read",  sanityCost:14, lore:true, desc:"Identify ALL contacts and read the deep. −14 MIND." },
-    madness:     { id:"madness",     name:"Intrusive Thought", cost:0, kind:"curse",       target:"none",    cat:"curse", desc:"Unplayable. −1 MIND each cycle it clogs the hand." },
+  // ---- Monster archetypes. dmgType hull|sanity. footprint resolved in game.js. ----
+  // aura: extra ambient sanity drain per probe while this monster is unrevealed.
+  // multiZone/clumpZone: zone index at/after which the bigger footprint kicks in.
+  var MONSTERS = {
+    angler:    { name: "Anglerfish",     tier: 1, dmgType: "hull",   dmg: [10, 16], sanity: 0,  shape: "angler",    footprint: "single" },
+    hagfish:   { name: "Hagfish Knot",   tier: 1, dmgType: "sanity", dmg: [12, 16], sanity: 0,  shape: "hagfish",   footprint: "single" },
+    gulper:    { name: "Gulper Shoal",   tier: 1, dmgType: "hull",   dmg: [8, 12],  sanity: 0,  shape: "shoal",     footprint: "single" },
+    swimmer:   { name: "Pale Swimmer",   tier: 2, dmgType: "sanity", dmg: [18, 24], sanity: 0,  shape: "swimmer",   footprint: "single", aura: 1 },
+    squid:     { name: "Colossal Squid", tier: 2, dmgType: "hull",   dmg: [18, 26], sanity: 0,  shape: "squid",     footprint: "single", multiZone: 3, multiFootprint: "pair" },
+    bonewhale: { name: "Bonewhale",      tier: 3, dmgType: "hull",   dmg: [24, 34], sanity: 10, shape: "whale",     footprint: "line3" },
+    leviathan: { name: "THE LEVIATHAN",  tier: 4, dmgType: "hull",   dmg: [40, 52], sanity: 20, shape: "leviathan", footprint: "box2x2" },
   };
 
-  var START_DECK = ["ping","ping","scan","scan","investigate","investigate","evade","brace","vent","steady"];
-
-  // ---- Contact archetypes by category ----
-  var CONTACTS = {
-    wreck: [
-      { name:"Sister Sub K-219" }, { name:"Trawler Morskaya" }, { name:"Cargo Hulk" },
-      { name:"Drowned Bathyscaphe" }, { name:"Listing Tanker" }, { name:"Buried Pipeline" },
-    ],
-    artifact: [
-      { name:"Black Monolith" }, { name:"Resonant Idol" }, { name:"Glyph Pillar" },
-      { name:"Bonecage Shrine" }, { name:"The Antenna" },
-    ],
-    creature: {
-      1: [ { name:"Anglerfish Horror", atk:[8,14], type:"hull" },
-           { name:"Gulper Shoal",      atk:[8,12], type:"hull" },
-           { name:"Hagfish Knot",      atk:[8,12], type:"sanity" } ],
-      2: [ { name:"Pale Swimmer",      atk:[16,22], type:"sanity" },
-           { name:"Colossal Squid",    atk:[18,24], type:"hull" },
-           { name:"Bonewhale Calf",    atk:[16,22], type:"hull" } ],
-      3: [ { name:"THE LEVIATHAN",     atk:[34,44], type:"hull" } ],
-    },
-    anomaly: [
-      { name:"Whisper Rift" }, { name:"Pressure Bloom" }, { name:"Signal Ghost" },
-      { name:"The Hollow" }, { name:"Static Choir" },
-    ],
+  // ---- Loot archetypes. kind data|wreck|artifact|shard|vent. ----
+  var LOOT = {
+    data:  { name: "Data Mote",      kind: "data",     value: [8, 16],    shape: "data" },
+    wreck: { name: "Wreck Cache",    kind: "wreck",    value: [25, 55],   shape: "wreck" },     // also opens a safe pocket
+    idol:  { name: "Resonant Idol",  kind: "artifact", value: [120, 260], shape: "artifact", carrySanity: 1 },
+    glyph: { name: "Glyph Pillar",   kind: "artifact", value: [350, 600], shape: "artifact", carrySanity: 2, minZone: 3 },
+    shard: { name: "Source Shard",   kind: "shard",    value: [500, 900], shape: "anomaly" },
+    vent:  { name: "Air Vent",       kind: "vent",     o2: 20, hull: 8,   shape: "anomaly" },
   };
 
-  // ---- Reward tables (weighted). type 'card' adds a card; 'res' changes a stat; 'lore'. ----
-  var REWARDS = {
-    wreck: [
-      { w:3, type:"card", card:"plating" },
-      { w:3, type:"card", card:"o2cache" },
-      { w:1, type:"card", card:"torpedo" },
-      { w:2, type:"res", stat:"hull", amt:15, msg:"Salvaged hull plate. +15 HULL." },
-      { w:2, type:"res", stat:"oxygen", amt:18, msg:"Tapped a live air line. +18 O2." },
-    ],
-    artifact: [
-      { w:3, type:"card", card:"resonance" },
-      { w:2, type:"card", card:"charts" },
-      { w:3, type:"card", card:"focus" },
-      { w:2, type:"lore" },
-    ],
-    anomaly: [
-      { w:3, type:"card", card:"knowledge" },
-      { w:2, type:"card", card:"resonance" },
-      { w:3, type:"lore" },
-      { w:3, type:"card", card:"madness" },
-    ],
-  };
-
-  // sanity paid when you investigate these categories (creatures handled separately)
-  var INVESTIGATE_SANITY = { wreck:0, artifact:8, anomaly:10 };
-  var ANOMALY_DRAIN = 3; // sanity lost per held cycle while an anomaly is present
-
-  // ---- Per-band generation config (index 0 unused; bands 1..8) ----
-  // catW: category weights. cTier: allowed creature tiers (weighted by order).
-  var BANDS = [
+  // ---- Depth zones (index 1..6). pool = weighted monster id bag. ----
+  var ZONES = [
     null,
-    { depth:120,  count:3, catW:{wreck:5,artifact:3,creature:2,anomaly:0}, cTier:[1] },
-    { depth:380,  count:4, catW:{wreck:4,artifact:3,creature:3,anomaly:1}, cTier:[1] },
-    { depth:760,  count:4, catW:{wreck:3,artifact:3,creature:4,anomaly:2}, cTier:[1,2] },
-    { depth:1300, count:5, catW:{wreck:3,artifact:2,creature:4,anomaly:3}, cTier:[1,2] },
-    { depth:2100, count:5, catW:{wreck:2,artifact:2,creature:5,anomaly:3}, cTier:[2,1] },
-    { depth:3200, count:5, catW:{wreck:2,artifact:2,creature:5,anomaly:4}, cTier:[2] },
-    { depth:4800, count:4, catW:{wreck:1,artifact:2,creature:5,anomaly:5}, cTier:[2] },
-    { depth:6400, count:1, catW:{creature:1}, cTier:[3], floor:true }, // the source
+    { name: "Continental Shelf", depth: 120,  w: 6,  h: 6,  monsters: 5,  data: 6,  artifacts: 0, wrecks: 1, vents: 1, valueMult: 1.0, sanityDrain: 4,
+      pool: ["angler", "angler", "angler", "gulper", "gulper"], artifactPool: ["idol"] },
+    { name: "The Twilight",      depth: 600,  w: 7,  h: 7,  monsters: 8,  data: 7,  artifacts: 1, wrecks: 1, vents: 1, valueMult: 1.6, sanityDrain: 7,
+      pool: ["angler", "angler", "gulper", "gulper", "hagfish", "swimmer"], artifactPool: ["idol"] },
+    { name: "The Midnight",      depth: 1500, w: 8,  h: 8,  monsters: 13, data: 8,  artifacts: 2, wrecks: 2, vents: 1, valueMult: 2.5, sanityDrain: 10,
+      pool: ["angler", "gulper", "hagfish", "hagfish", "swimmer", "squid"], artifactPool: ["idol", "glyph"] },
+    { name: "The Abyss",         depth: 3200, w: 9,  h: 9,  monsters: 19, data: 9,  artifacts: 2, wrecks: 2, vents: 2, valueMult: 4.0, sanityDrain: 14,
+      pool: ["angler", "gulper", "hagfish", "swimmer", "swimmer", "squid", "squid", "bonewhale"], artifactPool: ["idol", "glyph"], shard: 1 },
+    { name: "The Hadal Trench",  depth: 5400, w: 10, h: 10, monsters: 27, data: 10, artifacts: 3, wrecks: 2, vents: 2, valueMult: 6.0, sanityDrain: 18,
+      pool: ["gulper", "hagfish", "swimmer", "swimmer", "squid", "squid", "bonewhale", "bonewhale"], artifactPool: ["glyph", "glyph", "idol"], shard: 1 },
+    { name: "THE SOURCE",        depth: 6800, w: 10, h: 10, monsters: 26, data: 8,  artifacts: 1, wrecks: 1, vents: 2, valueMult: 8.0, sanityDrain: 22,
+      pool: ["swimmer", "squid", "squid", "bonewhale", "bonewhale", "hagfish"], artifactPool: ["glyph"], shard: 1, leviathan: true, source: true },
+  ];
+
+  // ---- Shop. game.js interprets effects by id. vals indexed by (level-1). ----
+  var SHOP = [
+    { id: "o2",     name: "O2 Scrubbers",       costs: [150, 400, 900, 2000], vals: [130, 160, 190, 220], unit: "max O₂",
+      desc: "Bigger tanks. More air = more probes per dive = more loot reach." },
+    { id: "hull",   name: "Hull Plating",       costs: [200, 500, 1100, 2400], vals: [125, 150, 175, 200], unit: "max hull",
+      desc: "Welded pressure plating. Survive deeper monster strikes." },
+    { id: "sanity", name: "Sanity Stabilizers", costs: [350, 900], vals: [1, 2], unit: "tier",
+      desc: "Sedatives & damping. Halve mind drain, then hold the scope steady far deeper." },
+    { id: "peek",   name: "Probe-Sonar",        costs: [400, 900, 1800], vals: [1, 2, 3], unit: "peeks / dive",
+      desc: "A directed pulse: safely identify one cell's contents without triggering it." },
+    { id: "chord",  name: "Auto-Chord Relay",   costs: [300], vals: [1], unit: "",
+      desc: "Tap a satisfied number to auto-probe its un-flagged neighbours. Clears board fast." },
+    { id: "tongs",  name: "Salvage Tongs",      costs: [600], vals: [1], unit: "",
+      desc: "Reinforced grapple. Keep your single best artifact even if a dive is lost." },
+    { id: "depth",  name: "Depth Charter",      costs: [250, 700, 1600, 3500, 8000], vals: [2, 3, 4, 5, 6], unit: "unlock zone",
+      desc: "Charter pressure clearance for the next trench zone down. The way to the Source." },
   ];
 
   var LORE = [
@@ -113,16 +81,14 @@
     "We found the first sub sent down. K-219. Her log ends mid-word. Her reactor is still warm.",
     "The pressure has a texture this deep. It presses thoughts flat. The men hear their mothers in the pipes.",
     "It is not a beacon and not a creature. It is a door — and it has been knocking.",
+    "The shards sing to each other in the hold. When all are gathered, the trench floor will open.",
   ];
 
   root.DN = root.DN || {};
   root.DN.CFG = CFG;
-  root.DN.CARDS = CARDS;
-  root.DN.START_DECK = START_DECK;
-  root.DN.CONTACTS = CONTACTS;
-  root.DN.REWARDS = REWARDS;
-  root.DN.INVESTIGATE_SANITY = INVESTIGATE_SANITY;
-  root.DN.ANOMALY_DRAIN = ANOMALY_DRAIN;
-  root.DN.BANDS = BANDS;
+  root.DN.MONSTERS = MONSTERS;
+  root.DN.LOOT = LOOT;
+  root.DN.ZONES = ZONES;
+  root.DN.SHOP = SHOP;
   root.DN.LORE = LORE;
 })(typeof window !== "undefined" ? window : this);

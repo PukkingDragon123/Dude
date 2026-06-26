@@ -248,6 +248,20 @@
     o.start(t); o.stop(t + 1.6); cleanup(o, g, t + 1.8);
   };
 
+  A.ascend = function () { // blow ballast: rising whoosh + bubbles
+    if (!ok()) return;
+    var t = now();
+    var g = A.ctx.createGain(); g.connect(A.sfxBus);
+    var o = osc("sine", 80, g); o.frequency.exponentialRampToValueAtTime(280, t + 1.2);
+    env(g.gain, t, 0.15, 0.45, 1.1, 0.0001);
+    var src = A.ctx.createBufferSource(); src.buffer = noiseBuffer(1.0);
+    var bp = A.ctx.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 1.0;
+    bp.frequency.setValueAtTime(400, t); bp.frequency.exponentialRampToValueAtTime(2200, t + 1.0);
+    var ng = A.ctx.createGain(); src.connect(bp); bp.connect(ng); ng.connect(A.sfxBus);
+    env(ng.gain, t, 0.05, 0.28, 1.0, 0.0001);
+    o.start(t); o.stop(t + 1.3); src.start(t); src.stop(t + 1.1); cleanup(o, g, t + 1.5);
+  };
+
   A.win = function () {
     if (!ok()) return;
     var t = now(), notes = [55, 82.4, 110, 164.8];

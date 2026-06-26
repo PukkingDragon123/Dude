@@ -461,10 +461,105 @@
     return "rgb("+Math.round(ca[0]+(cb[0]-ca[0])*t)+","+Math.round(ca[1]+(cb[1]-ca[1])*t)+","+Math.round(ca[2]+(cb[2]-ca[2])*t)+")"; }
   function hex(h){ h=h.replace("#",""); if(h.length===3) h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2]; return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)]; }
 
+  // ---------- Minesweeper sonar grid (crisp CRT readout over the low-res buffer) ----------
+  function numColor(n) {
+    return n <= 0 ? PAL.phos : n === 1 ? PAL.phosHi : n === 2 ? PAL.bio : n === 3 ? PAL.amber
+      : n === 4 ? PAL.amberHi : n === 5 ? PAL.rustHi : n <= 7 ? PAL.bloodHi : "#ff5050";
+  }
+  function glowDot(ctx, x, y, r, col, a) {
+    var g = ctx.createRadialGradient(x, y, 0, x, y, r * 1.8); g.addColorStop(0, col); g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.save(); ctx.globalAlpha = (a == null ? 1 : a) * 0.8; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r * 1.8, 0, 7); ctx.fill(); ctx.restore();
+  }
+  function textCentered(ctx, str, x, y, size, color) {
+    ctx.font = "bold " + size + "px 'Courier New', monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillText(str, x + 1, y + 1); ctx.fillStyle = color; ctx.fillText(str, x, y);
+    ctx.textBaseline = "alphabetic";
+  }
+
+  // small low-poly content glyph for a loot cell / cargo readout
+  function lootGlyph(ctx, x, y, s, kind, t) {
+    t = t || 0; ctx.save(); ctx.translate(x, y);
+    var pulse = 0.55 + 0.45 * Math.sin(t * 3 + x * 0.1);
+    if (kind === "data") {
+      glowDot(ctx, 0, 0, s * 0.7, PAL.bio, pulse);
+      poly(ctx, [[0, -s * 0.5], [s * 0.42, 0], [0, s * 0.5], [-s * 0.42, 0]], PAL.bioHi, PAL.ink, 1);
+      ctx.fillStyle = "#04120e"; ctx.beginPath(); ctx.arc(0, 0, s * 0.14, 0, 7); ctx.fill();
+    } else if (kind === "wreck") {
+      poly(ctx, [[-s * 0.6, s * 0.2], [-s * 0.1, -s * 0.32], [s * 0.5, -s * 0.1], [s * 0.55, s * 0.35], [-s * 0.5, s * 0.45]], PAL.rust, PAL.ink, 1);
+      poly(ctx, [[-s * 0.6, s * 0.2], [-s * 0.1, -s * 0.32], [-s * 0.22, s * 0.1]], PAL.rustHi);
+    } else if (kind === "artifact") {
+      glowDot(ctx, 0, 0, s * 0.7, PAL.bio, pulse * 0.8);
+      poly(ctx, [[-s * 0.22, -s * 0.55], [s * 0.2, -s * 0.5], [s * 0.24, s * 0.5], [-s * 0.18, s * 0.55]], "#0c1016", PAL.ink, 1);
+      ctx.strokeStyle = PAL.bioHi; ctx.lineWidth = 1.4; ctx.globalAlpha = pulse;
+      ctx.beginPath(); ctx.moveTo(-s * 0.05, -s * 0.3); ctx.lineTo(s * 0.06, -s * 0.05); ctx.lineTo(-s * 0.02, s * 0.2); ctx.stroke(); ctx.globalAlpha = 1;
+    } else if (kind === "shard") {
+      glowDot(ctx, 0, 0, s * 1.05, PAL.violetHi, pulse);
+      ctx.fillStyle = PAL.bioHi;
+      for (var i = 0; i < 4; i++) { var a = i / 4 * Math.PI * 2 + t * 0.6;
+        poly(ctx, [[Math.cos(a) * s * 0.62, Math.sin(a) * s * 0.62], [Math.cos(a + 0.5) * s * 0.16, Math.sin(a + 0.5) * s * 0.16], [Math.cos(a - 0.5) * s * 0.16, Math.sin(a - 0.5) * s * 0.16]], PAL.bioHi); }
+      ctx.beginPath(); ctx.arc(0, 0, s * 0.18, 0, 7); ctx.fill();
+    } else if (kind === "vent") {
+      glowDot(ctx, 0, s * 0.18, s * 0.7, PAL.phos, pulse);
+      ctx.strokeStyle = PAL.phosHi; ctx.lineWidth = 1.6; ctx.lineCap = "round";
+      for (var v = 0; v < 3; v++) { var yy = s * 0.3 - v * s * 0.26; ctx.beginPath();
+        ctx.moveTo(-s * 0.3, yy + s * 0.12); ctx.lineTo(0, yy - s * 0.12); ctx.lineTo(s * 0.3, yy + s * 0.12); ctx.stroke(); }
+    }
+    ctx.restore();
+  }
+
+  function drawCell(ctx, x, y, s, c, t) {
+    var r = Math.max(2, s * 0.12);
+    if (c.revealed) {
+      if (c.triggered) { // a struck monster cell
+        var g = ctx.createLinearGradient(x, y, x, y + s); g.addColorStop(0, "#3a0d10"); g.addColorStop(1, "#160405");
+        ctx.fillStyle = g; rrect(ctx, x, y, s, s, r); ctx.fill();
+        ctx.strokeStyle = PAL.blood; ctx.lineWidth = 1.4; rrect(ctx, x, y, s, s, r); ctx.stroke();
+        var cxp = x + s / 2, cyp = y + s / 2;
+        poly(ctx, [[cxp - s * 0.24, cyp - s * 0.12], [cxp + s * 0.24, cyp - s * 0.12], [cxp, cyp + s * 0.28]], PAL.bloodHi);
+        ctx.fillStyle = "#160405"; ctx.beginPath(); ctx.arc(cxp - s * 0.09, cyp - s * 0.05, s * 0.05, 0, 7); ctx.arc(cxp + s * 0.09, cyp - s * 0.05, s * 0.05, 0, 7); ctx.fill();
+      } else { // safe revealed cell, recessed phosphor face
+        ctx.fillStyle = "#06100c"; rrect(ctx, x, y, s, s, r); ctx.fill();
+        ctx.strokeStyle = "rgba(24,70,54,0.7)"; ctx.lineWidth = 1; rrect(ctx, x, y, s, s, r); ctx.stroke();
+        if (c.loot) lootGlyph(ctx, x + s / 2, y + s / 2, s * 0.34, c.loot, t);
+        else { var nshow = (c.dnum != null ? c.dnum : c.n); if (nshow > 0) textCentered(ctx, nshow + "", x + s / 2, y + s / 2, Math.round(s * 0.58), c.cor ? PAL.violetHi : numColor(nshow)); }
+      }
+    } else { // fogged faceted tile
+      var gg = ctx.createLinearGradient(x, y, x, y + s); gg.addColorStop(0, PAL.steelHi); gg.addColorStop(0.5, PAL.steel); gg.addColorStop(1, PAL.steelLo);
+      ctx.fillStyle = gg; rrect(ctx, x, y, s, s, r); ctx.fill();
+      poly(ctx, [[x, y], [x + s, y], [x, y + s]], "rgba(255,255,255,0.06)");
+      poly(ctx, [[x + s, y], [x + s, y + s], [x, y + s]], "rgba(0,0,0,0.28)");
+      ctx.strokeStyle = PAL.steelLo; ctx.lineWidth = 1; rrect(ctx, x, y, s, s, r); ctx.stroke();
+      if (c.flagged) {
+        ctx.strokeStyle = "#7c1414"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x + s * 0.33, y + s * 0.22); ctx.lineTo(x + s * 0.33, y + s * 0.8); ctx.stroke();
+        poly(ctx, [[x + s * 0.33, y + s * 0.22], [x + s * 0.68, y + s * 0.34], [x + s * 0.33, y + s * 0.47]], PAL.bloodHi);
+      } else if (c.peek) { // pulse-scanned: content known, not triggered
+        if (ctx.setLineDash) ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = PAL.amberHi; ctx.lineWidth = 1.4; rrect(ctx, x + 2, y + 2, s - 4, s - 4, r); ctx.stroke();
+        if (ctx.setLineDash) ctx.setLineDash([]);
+        if (c.mon) textCentered(ctx, "!", x + s / 2, y + s / 2, Math.round(s * 0.5), PAL.bloodHi);
+        else if (c.loot) lootGlyph(ctx, x + s / 2, y + s / 2, s * 0.3, c.loot, t);
+        else textCentered(ctx, "·", x + s / 2, y + s / 2, Math.round(s * 0.6), PAL.phosHi);
+      }
+    }
+  }
+
+  function drawGrid(ctx, o) {
+    var cells = o.cells, gw = o.gw, gh = o.gh, cs = o.cell, gap = o.gap == null ? 2 : o.gap, x0 = o.x, y0 = o.y, t = o.time || 0;
+    for (var cy = 0; cy < gh; cy++) for (var cx = 0; cx < gw; cx++) {
+      var c = cells[cy * gw + cx]; if (!c) continue;
+      var px = x0 + cx * (cs + gap), py = y0 + cy * (cs + gap);
+      drawCell(ctx, px, py, cs, c, t);
+      if (o.cursor && o.cursor.x === cx && o.cursor.y === cy) {
+        ctx.strokeStyle = PAL.phosHi; ctx.lineWidth = 2; rrect(ctx, px - 1, py - 1, cs + 2, cs + 2, 3); ctx.stroke();
+      }
+    }
+  }
+
   root.DN = root.DN || {};
   root.DN.Art = {
     PAL: PAL, rebake: rebake, drawWater: drawWater, drawSonar: drawSonar, drawPortrait: drawPortrait,
     drawCockpit: drawCockpit, gauge: gauge, card: card, glyph: glyph, button: button, overlay: overlay,
     text: text, wrapText: wrapText, rrect: rrect, drawTitle: drawTitle, catColor: catColor, mix: mix,
+    drawGrid: drawGrid, drawCell: drawCell, lootGlyph: lootGlyph, numColor: numColor, glowDot: glowDot, textCentered: textCentered,
   };
 })(typeof window !== "undefined" ? window : this);
