@@ -751,6 +751,73 @@
     ctx.restore();
   }
 
+  // ---------- cute cabin plushies (morale decor) ----------
+  function drawPlushie(ctx, x, y, s, id, col, t) {
+    t = t || 0; col = col || PAL.amber; ctx.save(); ctx.translate(x, y + Math.sin(t * 1.5 + x) * s * 0.04);
+    // hanging string
+    ctx.strokeStyle = "rgba(180,190,200,0.5)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, -s * 1.4); ctx.lineTo(0, -s * 0.6); ctx.stroke();
+    function eyes(ex, ey, er) { ctx.fillStyle = "#0a0a0a"; ctx.beginPath(); ctx.arc(-ex, ey, er, 0, 7); ctx.arc(ex, ey, er, 0, 7); ctx.fill(); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(-ex + er * 0.3, ey - er * 0.3, er * 0.35, 0, 7); ctx.arc(ex + er * 0.3, ey - er * 0.3, er * 0.35, 0, 7); ctx.fill(); }
+    if (id === "duck") {
+      ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(0, s * 0.2, s * 0.55, s * 0.42, 0, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(s * 0.2, -s * 0.2, s * 0.36, 0, 7); ctx.fill();
+      ctx.fillStyle = "#e8702a"; poly(ctx, [[s * 0.45, -s * 0.22], [s * 0.78, -s * 0.12], [s * 0.45, -s * 0.02]], "#e8702a"); eyes(s * 0.08, -s * 0.28, s * 0.06); ctx.translate(s * 0.2, -s * 0.2);
+    } else if (id === "bear") {
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(-s * 0.32, -s * 0.32, s * 0.16, 0, 7); ctx.arc(s * 0.32, -s * 0.32, s * 0.16, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0, s * 0.25, s * 0.42, s * 0.4, 0, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(0, -s * 0.18, s * 0.38, 0, 7); ctx.fill();
+      ctx.fillStyle = mix(col, "#000", 0.25); ctx.beginPath(); ctx.arc(0, -s * 0.08, s * 0.16, 0, 7); ctx.fill(); eyes(s * 0.14, -s * 0.24, s * 0.055); ctx.fillStyle = "#0a0a0a"; ctx.beginPath(); ctx.arc(0, -s * 0.12, s * 0.05, 0, 7); ctx.fill();
+    } else if (id === "angler") {
+      ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(0, 0, s * 0.5, s * 0.42, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "#0b1418"; poly(ctx, [[-s * 0.1, s * 0.08], [s * 0.5, -s * 0.05], [s * 0.45, s * 0.3]], "#0b1418");
+      ctx.fillStyle = PAL.boneHi; for (var i = 0; i < 4; i++) { var tx = s * (0.05 + i * 0.1); poly(ctx, [[tx, s * 0.05], [tx + s * 0.02, s * 0.05], [tx + s * 0.01, s * 0.16]], PAL.boneHi); }
+      ctx.strokeStyle = "#2a3a30"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(-s * 0.2, -s * 0.3); ctx.quadraticCurveTo(-s * 0.5, -s * 0.7, -s * 0.3, -s * 0.7); ctx.stroke(); glowDot(ctx, -s * 0.3, -s * 0.72, s * 0.14, PAL.bioHi, 1); eyes(s * 0.05, -s * 0.12, s * 0.06);
+    } else if (id === "squid") {
+      ctx.fillStyle = col; poly(ctx, [[-s * 0.3, -s * 0.5], [s * 0.3, -s * 0.5], [s * 0.22, s * 0.1], [-s * 0.22, s * 0.1]], col, PAL.ink, 1);
+      ctx.strokeStyle = col; ctx.lineWidth = s * 0.08; ctx.lineCap = "round"; for (var tt = 0; tt < 5; tt++) { var ox = -s * 0.18 + tt * s * 0.09; ctx.beginPath(); ctx.moveTo(ox, s * 0.05); ctx.quadraticCurveTo(ox + Math.sin(t * 2 + tt) * s * 0.1, s * 0.4, ox + Math.sin(t * 2 + tt) * s * 0.16, s * 0.6); ctx.stroke(); }
+      eyes(s * 0.12, -s * 0.2, s * 0.08);
+    } else { // jelly
+      ctx.fillStyle = col; ctx.globalAlpha = 0.85; ctx.beginPath(); ctx.ellipse(0, -s * 0.1, s * 0.45, s * 0.38, 0, Math.PI, 0); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-s * 0.45, -s * 0.1); ctx.lineTo(s * 0.45, -s * 0.1); ctx.lineTo(s * 0.36, s * 0.0); ctx.lineTo(-s * 0.36, 0); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1; ctx.strokeStyle = col; ctx.lineWidth = s * 0.05; for (var j = 0; j < 5; j++) { var jx = -s * 0.3 + j * s * 0.15; ctx.beginPath(); ctx.moveTo(jx, 0); ctx.quadraticCurveTo(jx + Math.sin(t * 3 + j) * s * 0.08, s * 0.5, jx, s * 0.7); ctx.stroke(); }
+      eyes(s * 0.12, -s * 0.18, s * 0.06);
+    }
+    ctx.restore();
+  }
+
+  // ---------- oil-rig surface base (the hub) ----------
+  function drawRig(ctx, w, h, t) {
+    var sky = ctx.createLinearGradient(0, 0, 0, h); sky.addColorStop(0, "#0a1018"); sky.addColorStop(0.6, "#0c1622"); sky.addColorStop(1, "#040810");
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
+    // distant lightning flicker
+    if (Math.sin(t * 0.6) > 0.985) { ctx.fillStyle = "rgba(120,140,170,0.12)"; ctx.fillRect(0, 0, w, h * 0.5); }
+    var seaY = h * 0.62;
+    // rig silhouette (right side)
+    ctx.fillStyle = "#070b11"; var rx = w * 0.62, rw = w * 0.3, pad = seaY - h * 0.16;
+    ctx.fillRect(rx, pad, rw, h * 0.05); // platform deck
+    ctx.strokeStyle = "#0b1119"; ctx.lineWidth = Math.max(3, w * 0.006);
+    var legs = [rx + rw * 0.12, rx + rw * 0.5, rx + rw * 0.88];
+    for (var i = 0; i < legs.length; i++) { ctx.beginPath(); ctx.moveTo(legs[i], pad + h * 0.05); ctx.lineTo(legs[i], seaY + h * 0.05); ctx.stroke(); }
+    // cross-braces
+    ctx.lineWidth = Math.max(1.5, w * 0.003); for (var b = 0; b < legs.length - 1; b++) { ctx.beginPath(); ctx.moveTo(legs[b], pad + h * 0.05); ctx.lineTo(legs[b + 1], seaY); ctx.moveTo(legs[b + 1], pad + h * 0.05); ctx.lineTo(legs[b], seaY); ctx.stroke(); }
+    // derrick
+    ctx.beginPath(); ctx.moveTo(rx + rw * 0.3, pad); ctx.lineTo(rx + rw * 0.42, pad - h * 0.18); ctx.lineTo(rx + rw * 0.54, pad); ctx.stroke();
+    // warning lamps on the rig
+    var lp = 0.5 + 0.5 * Math.sin(t * 4); glowDot(ctx, rx + rw * 0.42, pad - h * 0.185, w * 0.012, "#ff6452", lp);
+    ctx.fillStyle = mix("#220505", "#ff6452", lp); ctx.beginPath(); ctx.arc(rx + rw * 0.42, pad - h * 0.185, Math.max(2, w * 0.004), 0, 7); ctx.fill();
+    // sea
+    var sea = ctx.createLinearGradient(0, seaY, 0, h); sea.addColorStop(0, "#0a1a22"); sea.addColorStop(1, "#02080e");
+    ctx.fillStyle = sea; ctx.beginPath(); ctx.moveTo(0, seaY); for (var x = 0; x <= w; x += w / 20) ctx.lineTo(x, seaY + Math.sin(x * 0.02 + t * 1.5) * 4); ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath(); ctx.fill();
+    // chain (the tether) from rig down into the water + the sub
+    var chx = rx + rw * 0.5; ctx.strokeStyle = "rgba(120,130,140,0.6)"; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(chx, pad + h * 0.05); ctx.lineTo(chx, seaY + 6); ctx.stroke(); ctx.setLineDash([]);
+    glowDot(ctx, chx, seaY + 10, w * 0.02, PAL.amber, 0.5);
+    // the little submarine hanging just below the surface
+    ctx.save(); ctx.translate(chx, seaY + h * 0.06 + Math.sin(t * 1.2) * 3); var s = Math.min(w, h) * 0.04;
+    poly(ctx, [[-s * 1.6, 0], [-s * 1.2, -s * 0.5], [s * 1.1, -s * 0.45], [s * 1.5, 0], [s * 1.1, s * 0.45], [-s * 1.2, s * 0.5]], PAL.steel, PAL.ink, 1.5);
+    poly(ctx, [[-s * 0.3, -s * 0.5], [-s * 0.1, -s * 0.95], [s * 0.25, -s * 0.9], [s * 0.2, -s * 0.46]], PAL.steel, PAL.ink, 1);
+    ctx.fillStyle = PAL.amberHi; for (var p = 0; p < 3; p++) { ctx.beginPath(); ctx.arc(-s * 0.5 + p * s * 0.5, -s * 0.05, s * 0.08, 0, 7); ctx.fill(); }
+    ctx.restore();
+    // fog
+    if (cache.grain) { ctx.globalAlpha = 0.3; ctx.drawImage(cache.grain, 0, 0, w, h); ctx.globalAlpha = 1; }
+  }
+
   root.DN = root.DN || {};
   root.DN.Art = {
     PAL: PAL, rebake: rebake, drawWater: drawWater, drawSonar: drawSonar, drawPortrait: drawPortrait,
@@ -758,5 +825,6 @@
     text: text, wrapText: wrapText, rrect: rrect, drawTitle: drawTitle, catColor: catColor, mix: mix,
     drawGrid: drawGrid, drawCell: drawCell, lootGlyph: lootGlyph, numColor: numColor, glowDot: glowDot, textCentered: textCentered,
     drawForward: drawForward, drawOxygenTank: drawOxygenTank, drawDepthGauge: drawDepthGauge, drawWarnLamp: drawWarnLamp, drawLeak: drawLeak,
+    drawPlushie: drawPlushie, drawRig: drawRig,
   };
 })(typeof window !== "undefined" ? window : this);

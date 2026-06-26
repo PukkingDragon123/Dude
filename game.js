@@ -5,7 +5,7 @@
  * Depends (load order): strings.js, rng.js, data.js, audio.js, art.js. */
 (function () {
   "use strict";
-  var CFG = DN.CFG, LAYERS = DN.LAYERS, MON = DN.MONSTERS, LOOT = DN.LOOT, LORE = DN.LORE;
+  var CFG = DN.CFG, LAYERS = DN.LAYERS, MON = DN.MONSTERS, LOOT = DN.LOOT, LORE = DN.LORE, SHOP = DN.SHOP, PLUSHIES = DN.PLUSHIES;
   var Art = DN.Art, Audio = DN.Audio, S = window.STR, PAL = Art.PAL;
 
   var OPT = { sound: true, shake: true, scanlines: true };
@@ -48,12 +48,15 @@
     L.bottom = { x: 0, y: H - botH, w: W, h: botH };
     L.tank = { x: L.col.x + L.col.w * 0.30, y: L.col.y + 14, w: L.col.w * 0.40, h: L.col.h * 0.60 };
     L.depth = { cx: L.col.x + L.col.w * 0.5, cy: L.col.y + L.col.h * 0.82, r: Math.min(L.col.w * 0.32, 38) };
-    var bs = clamp(L.bottom.h * 0.40, 38, 62);
-    L.dpad = { cx: W - bs * 1.9, cy: L.bottom.y + L.bottom.h * 0.52, s: bs };
-    var bw = clamp(W * 0.15, 84, 150);
-    L.btn.ping = { x: 16, y: L.bottom.y + 14, w: bw, h: bs };
-    L.btn.light = { x: 16, y: L.bottom.y + 14 + bs + 8, w: bw, h: bs * 0.84 };
-    L.btn.brief = { x: 16 + bw + 10, y: L.bottom.y + 14, w: clamp(W * 0.11, 64, 110), h: bs * 0.7 };
+    var bs = clamp(L.bottom.h * 0.30, 30, 48), ds = clamp(L.bottom.h * 0.28, 28, 44);
+    L.dpad = { cx: W - ds * 1.85, cy: L.bottom.y + L.bottom.h * 0.52, s: ds };
+    var bw = clamp(W * 0.125, 60, 128), gap = 7, x0 = 12, y0 = L.bottom.y + 12, y1 = y0 + bs + 7;
+    L.btn.ping = { x: x0, y: y0, w: bw, h: bs };
+    L.btn.light = { x: x0, y: y1, w: bw, h: bs };
+    L.btn.excavate = { x: x0 + bw + gap, y: y0, w: bw, h: bs };
+    L.btn.patch = { x: x0 + bw + gap, y: y1, w: bw, h: bs };
+    L.btn.crank = { x: x0 + (bw + gap) * 2, y: y0, w: bw, h: bs };
+    L.btn.brief = { x: x0 + (bw + gap) * 2, y: y1, w: bw, h: bs };
   }
   function inside(r, p) { return r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; }
   function dpadRects() { var s = L.dpad.s, cx = L.dpad.cx, cy = L.dpad.cy; return {
@@ -67,6 +70,7 @@
     G = { scene: "titlemenu", seedStr: rng.seedStr, rng: rng, time: 0,
       layer: 1, gw: 7, gh: 7, cells: [], sub: { cx: 0, cy: 0 }, facing: { dx: 0, dy: 1 },
       hull: CFG.startHull, oxygen: CFG.startOxygen, pings: CFG.pingsStart, threat: 0, haul: 0, depth: 0,
+      money: 0, up: { hull: 0, o2: 0, pings: 0, bilge: 0, light: 0 }, patches: CFG.startPatches, plushies: [], onLoot: false, portMsg: "", portMsgT: 0, shopFocus: 0,
       lightOn: false, transit: null, stalker: null, woke: false, confirmDir: null,
       leak: 0, scare: null, snow: [], flash: 0, flashCol: "180,40,40", shake: 0, hbT: 0, heartbeat: 0,
       lamp: { o2: 0, hull: 0, wake: 0 }, endKind: null, won: false, menuSel: 0, padActive: false,
@@ -74,6 +78,16 @@
   }
   function fmt(t, o) { return String(t).replace(/\{(\w+)\}/g, function (m, key) { return o && o[key] != null ? o[key] : ""; }); }
   function cell(x, y) { return (x < 0 || y < 0 || x >= G.gw || y >= G.gh) ? null : G.cells[y * G.gw + x]; }
+  function curCell() { return cell(G.sub.cx, G.sub.cy); }
+  function shopItem(id) { for (var i = 0; i < SHOP.length; i++) if (SHOP[i].id === id) return SHOP[i]; return null; }
+  function shopVal(id, lvl) { var it = shopItem(id); return it.vals[lvl - 1]; }
+  function effMaxHull() { return G.up.hull ? shopVal("hull", G.up.hull) : CFG.maxHull; }
+  function effMaxOxygen() { return G.up.o2 ? shopVal("o2", G.up.o2) : CFG.startOxygen; }
+  function effPings() { return G.up.pings ? shopVal("pings", G.up.pings) : CFG.pingsStart; }
+  function lightRange() { return G.up.light ? 44 : 30; }
+  function lightThreatRate() { return CFG.threatLight * (G.up.light ? 0.5 : 1); }
+  function bilgeMult() { return G.up.bilge ? 0.62 : 1; }
+  function portMsg(m) { G.portMsg = m; G.portMsgT = 2.6; }
 
   // ---------------- layer generation (first 3x3 safe + carved monster-free path to hatch) ----------------
   function genLayer(layer) {
@@ -109,7 +123,7 @@
     for (var y2 = 0; y2 < G.gh; y2++) for (var x2 = 0; x2 < G.gw; x2++) { var t = cell(x2, y2); if (t.mon) continue; var cnt = 0; for (var ny = -1; ny <= 1; ny++) for (var nx = -1; nx <= 1; nx++) { if (!nx && !ny) continue; var nb = cell(x2 + nx, y2 + ny); if (nb && nb.mon) cnt++; } t.n = cnt; }
     // reveal start (it is a 0 — flood its pocket)
     var startC = cell(sx, sy); seeCell(startC);
-    G.pings = CFG.pingsStart; G.stalker = null; G.woke = false; G.confirmDir = null; G.transit = null;
+    G.pings = effPings(); G.stalker = null; G.woke = false; G.confirmDir = null; G.transit = null; G.onLoot = false;
     G.depth = Lc.depth;
     G.snow = []; for (var sN = 0; sN < 120; sN++) G.snow.push(newSnow(true));
   }
@@ -120,9 +134,10 @@
     if (c.n === 0) { for (var ny = -1; ny <= 1; ny++) for (var nx = -1; nx <= 1; nx++) { if (!nx && !ny) continue; var nb = cell(c.x + nx, c.y + ny); if (nb && !nb.mon && !nb.seen) seeCell(nb); } }
   }
 
-  function startRun() { G.layer = 1; G.hull = CFG.startHull; G.oxygen = CFG.startOxygen; G.haul = 0; G.threat = 0; G.lightOn = false; G.leak = 0; G.scare = null; G.loreSeen = []; G.won = false; G.endKind = null; genLayer(1); G.scene = "dive"; Audio.setMusic("ambient"); }
+  function startRun() { G.layer = 1; G.hull = effMaxHull(); G.oxygen = effMaxOxygen(); G.haul = 0; G.threat = 0; G.lightOn = false; G.leak = 0; G.scare = null; G.won = false; G.endKind = null; genLayer(1); G.scene = "dive"; Audio.setMusic("ambient"); }
   function descend() { Audio.descend(); if (OPT.shake) G.shake = 6; var nl = G.layer + 1; if (nl > CFG.layers) { winRun(); return; } genLayer(nl); G.threat = clamp(G.threat - 20, 0, 100); }
-  function winRun() { G.scene = "end"; G.won = true; G.endKind = "win"; Audio.setMusic("none"); Audio.win(); }
+  function surface() { if (G.scene !== "dive") return; G.money += G.haul; G.haul = 0; Audio.ascend(); G.scene = "rig"; Audio.setMusic("none"); }
+  function winRun() { G.money += G.haul; G.scene = "end"; G.won = true; G.endKind = "win"; Audio.setMusic("none"); Audio.win(); }
   function die(kind) { if (G.scene !== "dive") return; G.scene = "end"; G.won = false; G.endKind = kind; Audio.setMusic("none"); Audio.lose(); }
 
   // ---------------- actions ----------------
@@ -140,9 +155,9 @@
     var c = tr.target; G.transit = null; G.oxygen -= CFG.moveCost;
     if (c.mon) { strike(c); afterMove(); return; }
     G.sub = { cx: c.x, cy: c.y };
-    if (c.hatch) { if (c.source) { winRun(); return; } descend(); return; }
-    if (c.lootId && !c.collected) collect(c);
     seeCell(c);
+    if (c.lootId && !c.collected && c.kind === "vent") collect(c);       // thermal air is automatic
+    G.onLoot = !!(c.lootId && !c.collected && c.kind !== "vent");        // data/artifacts await EXCAVATE
     afterMove();
   }
   function afterMove() {
@@ -153,9 +168,29 @@
   }
   function collect(c) {
     c.collected = true;
-    if (c.kind === "vent") { G.oxygen = clamp(G.oxygen + c.o2, 0, CFG.startOxygen + 40); G.lamp.o2 = 0; Audio.vent(); G.flash = 0.2; G.flashCol = "40,240,170"; }
+    if (c.kind === "vent") { G.oxygen = clamp(G.oxygen + c.o2, 0, effMaxOxygen() + 40); G.lamp.o2 = 0; Audio.vent(); G.flash = 0.2; G.flashCol = "40,240,170"; }
     else if (c.kind === "artifact") { G.haul += c.value; Audio.good(); G.flash = 0.25; G.flashCol = "70,240,200"; }
     else { G.haul += c.value; Audio.scan(); }
+  }
+  function excavate() { // haul the data/artifact on the current cell (a deliberate, slightly loud dig)
+    if (G.scene !== "dive" || G.transit || G.scare) return; var c = curCell();
+    if (!c || !c.lootId || c.collected || c.kind === "vent") return;
+    collect(c); G.onLoot = false; G.oxygen -= 2; G.threat = clamp(G.threat + 6, 0, 100);
+    if (G.threat >= CFG.wake) stalkerWake();
+  }
+  function patch() { // hands-on leak repair
+    if (G.scene !== "dive" || G.transit) return;
+    if (G.patches <= 0) { G.lamp.hull = 0.4; return; }
+    if (G.hull >= effMaxHull()) return;
+    G.patches--; G.hull = clamp(G.hull + CFG.patchAmount, 0, effMaxHull());
+    G.leak = (1 - G.hull / effMaxHull()) * bilgeMult();
+    Audio.vent(); G.flash = 0.2; G.flashCol = "40,240,170";
+  }
+  function crank() { // the winch: descend on the hatch, breach on the Source, otherwise reel UP to the rig
+    if (G.scene !== "dive" || G.transit || G.scare) return; var c = curCell();
+    if (c && c.source) { winRun(); return; }
+    if (c && c.hatch) { descend(); return; }
+    surface();
   }
   function strike(c) {
     var def = MON[c.monId], dmg = G.rng.int(def.dmg[0], def.dmg[1]);
@@ -229,11 +264,11 @@
     G.oxygen -= CFG.idleDrain * s; if (G.oxygen <= 0) { G.oxygen = 0; return die("oxygen"); }
     if (G.oxygen < CFG.startOxygen * 0.2) G.lamp.o2 = Math.max(G.lamp.o2, 0.5 + 0.5 * Math.sin(G.time * 5));
     // threat
-    var add = 0; if (G.lightOn) add += CFG.threatLight * s;
+    var add = 0; if (G.lightOn) add += lightThreatRate() * s;
     G.threat = clamp(G.threat + add - CFG.threatDecay * s, 0, 100);
     if (G.threat >= CFG.wake) G.lamp.wake = Math.max(G.lamp.wake, 0.5);
-    // smooth leak severity toward hull damage
-    var target = 1 - G.hull / CFG.maxHull; G.leak += (target - G.leak) * Math.min(1, s * 2);
+    // smooth leak severity toward hull damage (bilge pump keeps the cabin drier)
+    var target = (1 - G.hull / effMaxHull()) * bilgeMult(); G.leak += (target - G.leak) * Math.min(1, s * 2);
     // heartbeat from stalker proximity / low hull / low air
     var hbScare = 0; if (G.stalker && G.stalker.active) { var sd = Math.abs(G.stalker.x - G.sub.cx) + Math.abs(G.stalker.y - G.sub.cy); hbScare = clamp(1 - sd / 6, 0, 1); }
     G.heartbeat = Math.max(hbScare, G.leak > 0.7 ? G.leak : 0, G.oxygen < CFG.startOxygen * 0.12 ? 0.6 : 0);
@@ -250,13 +285,14 @@
     if (UI.overlay === "help") return renderHelp();
     if (UI.overlay === "options") return renderOptions();
     if (G.scene === "dive") return renderDive();
+    if (G.scene === "rig") return renderRig();
     if (G.scene === "end") return renderEnd();
     return renderTitle();
   }
 
   function renderForwardBuffer() {
     var bw = buf.width, bh = buf.height; bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.clearRect(0, 0, bw, bh);
-    Art.drawForward(bctx, bw, bh, { contacts: forwardContacts(), snow: G.snow, lightOn: G.lightOn, threat: G.threat / 100, time: G.time, fov: 1.2, headlightRange: 30 });
+    Art.drawForward(bctx, bw, bh, { contacts: forwardContacts(), snow: G.snow, lightOn: G.lightOn, threat: G.threat / 100, time: G.time, fov: 1.2, headlightRange: lightRange() });
   }
   function forwardContacts() {
     var out = [], sp = 7, tp = G.transit ? G.transit.t : 0;
@@ -277,6 +313,7 @@
     var ph = L.porthole; ctx.save(); ctx.beginPath(); Art.rrect(ctx, ph.x, ph.y, ph.w, ph.h, 10); ctx.clip();
     ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, ph.x + shx, ph.y + shy, ph.w, ph.h); ctx.restore();
     portholeBezel(ph);
+    drawCabinPlushies();
     // monitor grid
     drawMonitor();
     // instruments
@@ -304,6 +341,12 @@
     ctx.lineWidth = 7; ctx.strokeStyle = PAL.steelLo; Art.rrect(ctx, ph.x - 3, ph.y - 3, ph.w + 6, ph.h + 6, 12); ctx.stroke();
     ctx.lineWidth = 2; ctx.strokeStyle = PAL.steelHi; Art.rrect(ctx, ph.x - 5, ph.y - 5, ph.w + 10, ph.h + 10, 14); ctx.stroke();
     ctx.fillStyle = PAL.rivet; var n = 8; for (var i = 0; i <= n; i++) { var t = i / n; ctx.beginPath(); ctx.arc(ph.x + ph.w * t, ph.y - 8, 2, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(ph.x + ph.w * t, ph.y + ph.h + 8, 2, 0, 7); ctx.fill(); }
+  }
+  function plushDef(id) { for (var i = 0; i < PLUSHIES.length; i++) if (PLUSHIES[i].id === id) return PLUSHIES[i]; return null; }
+  function drawCabinPlushies() {
+    if (!G.plushies.length) return; var ph = L.porthole, n = G.plushies.length;
+    var sz = clamp(Math.min(ph.h * 0.12, ph.w / (n + 1) * 0.45), 8, 22);
+    for (var i = 0; i < n; i++) { var pl = plushDef(G.plushies[i]); if (!pl) continue; Art.drawPlushie(ctx, ph.x + ph.w * ((i + 1) / (n + 1)), ph.y + sz * 1.9, sz, pl.id, pl.col, G.time); }
   }
 
   function drawMonitor() {
@@ -354,12 +397,14 @@
   }
 
   function drawControls() {
-    // ping charge dots (above ping button)
-    var pb = L.btn.ping; for (var i = 0; i < CFG.pingsStart; i++) { var on = i < G.pings; var dx = pb.x + 10 + i * 16, dy = pb.y - 10; ctx.beginPath(); ctx.arc(dx, dy, 5, 0, 7); ctx.fillStyle = on ? PAL.bioHi : "#13201a"; ctx.fill(); ctx.strokeStyle = PAL.phosLo; ctx.lineWidth = 1; ctx.stroke(); }
+    var pb = L.btn.ping; for (var i = 0; i < effPings(); i++) { var on = i < G.pings; var dx = pb.x + 8 + i * 12, dy = pb.y - 8; ctx.beginPath(); ctx.arc(dx, dy, 3.5, 0, 7); ctx.fillStyle = on ? PAL.bioHi : "#13201a"; ctx.fill(); ctx.strokeStyle = PAL.phosLo; ctx.lineWidth = 1; ctx.stroke(); }
     Art.button(ctx, pb, "PING", { primary: G.pingFlash > 0.4, hover: UI.hover === "ping", disabled: G.pings <= 0 });
     Art.button(ctx, L.btn.light, "LIGHT" + (G.lightOn ? " •" : ""), { primary: G.lightOn, hover: UI.hover === "light" });
+    Art.button(ctx, L.btn.excavate, "EXCAVATE", { primary: G.onLoot, hover: UI.hover === "excavate", disabled: !G.onLoot });
+    Art.button(ctx, L.btn.patch, "PATCH " + G.patches, { hover: UI.hover === "patch", disabled: G.patches <= 0 || G.hull >= effMaxHull() });
+    var oc = curCell(); var cl = (oc && oc.source) ? "BREACH" : (oc && oc.hatch) ? "DIVE ▼" : "RISE ▲";
+    Art.button(ctx, L.btn.crank, cl, { primary: !!(oc && (oc.hatch || oc.source)), hover: UI.hover === "crank" });
     Art.button(ctx, L.btn.brief, "?", { hover: UI.hover === "brief" });
-    // d-pad
     var d = dpadRects();
     Art.button(ctx, d.up, "▲", { hover: UI.hover === "up" }); Art.button(ctx, d.down, "▼", { hover: UI.hover === "down" });
     Art.button(ctx, d.left, "◄", { hover: UI.hover === "left" }); Art.button(ctx, d.right, "►", { hover: UI.hover === "right" });
@@ -413,6 +458,65 @@
     UI.contBtn = { x: W / 2 - 120, y: H - clamp(H * 0.16, 84, 140), w: 240, h: 52 }; Art.button(ctx, UI.contBtn, S.again, { primary: true, hover: UI.hover === "cont" }); Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
   }
 
+  // ---------------- oil-rig surface base (the hub: bank haul, buy equipment + plushies, descend) ----------------
+  function renderRig() {
+    var bw = buf.width, bh = buf.height; bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.clearRect(0, 0, bw, bh); Art.drawRig(bctx, bw, bh, G.time);
+    ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, 0, 0, W, H);
+    Art.text(ctx, "RIG DELTA-9", W / 2, clamp(H * 0.075, 30, 60), clamp(W * 0.032, 18, 30), PAL.phosHi, "center");
+    Art.text(ctx, "₽" + G.money + "    " + G.patches + " PATCH KITS", W / 2, clamp(H * 0.075, 30, 60) + clamp(W * 0.026, 15, 26), clamp(W * 0.02, 12, 18), PAL.amberHi, "center");
+    var twoCol = W > 760, topY = clamp(H * 0.16, 72, 140);
+    var leftX = clamp(W * 0.05, 14, 60), colW = twoCol ? clamp(W * 0.44, 280, 480) : W - clamp(W * 0.05, 14, 60) * 2;
+    Art.text(ctx, "OUTFIT — EQUIPMENT", leftX + 2, topY - 8, clamp(W * 0.02, 12, 16), PAL.bio, "left");
+    UI.shopHit = [];
+    var rowH = clamp((H - topY - 168) / SHOP.length, 36, 56), ry = topY;
+    for (var i = 0; i < SHOP.length; i++) {
+      var it = SHOP[i], lvl = G.up[it.id] || 0, repeat = it.repeat, maxed = !repeat && lvl >= it.costs.length;
+      var r = { x: leftX, y: ry, w: colW, h: rowH - 6 };
+      ctx.fillStyle = "rgba(10,14,20,0.55)"; Art.rrect(ctx, r.x, r.y, r.w, r.h, 5); ctx.fill();
+      ctx.strokeStyle = (G.padActive && G.shopFocus === i) ? PAL.phosHi : "rgba(90,100,114,0.5)"; ctx.lineWidth = (G.padActive && G.shopFocus === i) ? 2 : 1; Art.rrect(ctx, r.x, r.y, r.w, r.h, 5); ctx.stroke();
+      var label = it.name + (!repeat && it.costs.length > 1 ? "  [" + lvl + "/" + it.costs.length + "]" : (lvl && !repeat ? "  ✓" : ""));
+      Art.text(ctx, label, r.x + 10, r.y + 17, clamp(r.w * 0.04, 11, 15), maxed ? PAL.textDim : PAL.text, "left");
+      Art.wrapText(ctx, it.desc, r.x + r.w * 0.42, r.y + r.h - 8, r.w * 0.54, clamp(r.w * 0.028, 9, 12), PAL.textDim);
+      var btn = { x: r.x + r.w - 86, y: r.y + 6, w: 78, h: clamp(r.h - 12, 22, 32) };
+      if (maxed) Art.button(ctx, btn, "MAX", { disabled: true });
+      else { var cost = it.costs[repeat ? 0 : lvl]; Art.button(ctx, btn, "₽" + cost, { primary: G.money >= cost, hover: UI.hover === "buy" + it.id, disabled: G.money < cost }); UI.shopHit.push({ r: btn, id: it.id }); }
+      ry += rowH;
+    }
+    var rx = twoCol ? (W - leftX - colW) : leftX, rw = colW, ryy = twoCol ? topY : ry + 8;
+    Art.text(ctx, "MORALE — CABIN DECOR (PLUSHIES)", rx + 2, ryy - 8, clamp(W * 0.02, 12, 16), PAL.violetHi, "left");
+    UI.plushHit = [];
+    var pCols = PLUSHIES.length, pw = (rw - (pCols - 1) * 8) / pCols, ph = clamp(pw * 1.2, 46, 92);
+    for (var p = 0; p < PLUSHIES.length; p++) {
+      var pl = PLUSHIES[p], owned = G.plushies.indexOf(pl.id) >= 0, pr = { x: rx + p * (pw + 8), y: ryy, w: pw, h: ph };
+      ctx.fillStyle = owned ? "rgba(28,22,40,0.6)" : "rgba(10,14,20,0.55)"; Art.rrect(ctx, pr.x, pr.y, pr.w, pr.h, 5); ctx.fill();
+      ctx.strokeStyle = owned ? PAL.violetHi : "rgba(90,100,114,0.5)"; Art.rrect(ctx, pr.x, pr.y, pr.w, pr.h, 5); ctx.stroke();
+      Art.drawPlushie(ctx, pr.x + pr.w / 2, pr.y + pr.h * 0.40, Math.min(pr.w, pr.h) * 0.26, pl.id, pl.col, G.time);
+      Art.text(ctx, owned ? "✓" : "₽" + pl.cost, pr.x + pr.w / 2, pr.y + pr.h - 7, clamp(pw * 0.18, 9, 14), owned ? PAL.violetHi : (G.money >= pl.cost ? PAL.amberHi : PAL.textDim), "center");
+      if (!owned) UI.plushHit.push({ r: pr, id: pl.id, cost: pl.cost });
+    }
+    UI.diveBtn = { x: W / 2 - clamp(W * 0.22, 130, 220), y: H - clamp(H * 0.13, 70, 116), w: clamp(W * 0.44, 260, 440), h: clamp(H * 0.07, 44, 58) };
+    Art.button(ctx, UI.diveBtn, "▼  DESCEND  ▼", { primary: true, hover: UI.hover === "dive" });
+    UI.backBtn = { x: 12, y: H - 42, w: 108, h: 32 }; Art.button(ctx, UI.backBtn, S.menu_options, { hover: UI.hover === "back" });
+    UI.briefBtn = { x: 128, y: H - 42, w: 108, h: 32 }; Art.button(ctx, UI.briefBtn, S.menu_help, { hover: UI.hover === "brief" });
+    if (G.portMsgT > 0) { ctx.globalAlpha = clamp(G.portMsgT, 0, 1); Art.text(ctx, G.portMsg, W / 2, UI.diveBtn.y - 12, clamp(W * 0.02, 12, 17), PAL.amberHi, "center"); ctx.globalAlpha = 1; }
+    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
+  }
+  function buy(id) {
+    var it = shopItem(id), lvl = G.up[id] || 0;
+    if (id === "patch") { if (G.money < it.costs[0]) { portMsg("Not enough ₽."); Audio.alert(); return; } G.money -= it.costs[0]; G.patches += it.vals[0]; Audio.good(); portMsg("Patch kits stocked."); return; }
+    if (lvl >= it.costs.length) { portMsg("Already maxed."); return; }
+    var cost = it.costs[lvl]; if (G.money < cost) { portMsg("Not enough ₽."); Audio.alert(); return; }
+    G.money -= cost; G.up[id] = lvl + 1; Audio.good(); portMsg("Installed " + it.name + ".");
+  }
+  function buyPlushie(id, cost) { if (G.plushies.indexOf(id) >= 0) return; if (G.money < cost) { portMsg("Not enough ₽."); Audio.alert(); return; } G.money -= cost; G.plushies.push(id); Audio.good(); portMsg("A little friend for the cabin."); }
+  function onRigDown(p) {
+    for (var i = 0; i < UI.shopHit.length; i++) if (inside(UI.shopHit[i].r, p)) { buy(UI.shopHit[i].id); return; }
+    for (var j = 0; j < UI.plushHit.length; j++) if (inside(UI.plushHit[j].r, p)) { buyPlushie(UI.plushHit[j].id, UI.plushHit[j].cost); return; }
+    if (inside(UI.diveBtn, p)) { Audio.card(); startRun(); return; }
+    if (inside(UI.briefBtn, p)) { UI.overlay = "help"; return; }
+    if (inside(UI.backBtn, p)) { UI.overlay = "options"; return; }
+  }
+
   // ---------------- input ----------------
   var UI = { overlay: null, hover: null, menu: [], optHit: [] };
   var holdTimer = null, holdFired = false, holdCell = null;
@@ -423,12 +527,16 @@
     Audio.init(); if (!G) return;
     if (UI.overlay) { if (UI.overlay === "options" && UI.optHit) for (var i = 0; i < UI.optHit.length; i++) if (inside(UI.optHit[i].r, p)) { OPT[UI.optHit[i].key] = !OPT[UI.optHit[i].key]; saveOpt(); Audio.setEnabled(OPT.sound); Audio.card(); return; } if (inside(UI.backBtn, p)) { UI.overlay = null; Audio.card(); } return; }
     if (G.scene === "dive") return onDiveDown(p);
-    if (G.scene === "end") { if (inside(UI.contBtn, p)) { Audio.card(); startRun(); } return; }
-    for (var m = 0; m < UI.menu.length; m++) if (inside(UI.menu[m].r, p)) { var act = UI.menu[m].act; Audio.card(); if (act === "dive") startRun(); else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; return; }
+    if (G.scene === "rig") return onRigDown(p);
+    if (G.scene === "end") { if (inside(UI.contBtn, p)) { Audio.card(); G.scene = "rig"; } return; }
+    for (var m = 0; m < UI.menu.length; m++) if (inside(UI.menu[m].r, p)) { var act = UI.menu[m].act; Audio.card(); if (act === "dive") G.scene = "rig"; else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; return; }
   }
   function onDiveDown(p) {
     if (inside(L.btn.ping, p)) { ping(); return; }
     if (inside(L.btn.light, p)) { toggleLight(); return; }
+    if (inside(L.btn.excavate, p)) { excavate(); return; }
+    if (inside(L.btn.patch, p)) { patch(); return; }
+    if (inside(L.btn.crank, p)) { crank(); return; }
     if (inside(L.btn.brief, p)) { UI.overlay = "help"; return; }
     var d = dpadRects();
     if (inside(d.up, p)) { tryDrive(0, -1); return; } if (inside(d.down, p)) { tryDrive(0, 1); return; }
@@ -439,7 +547,8 @@
   }
   function onHover(p) { UI.hover = null; if (!G) return;
     if (UI.overlay) { if (inside(UI.backBtn, p)) UI.hover = "back"; return; }
-    if (G.scene === "dive") { if (inside(L.btn.ping, p)) UI.hover = "ping"; else if (inside(L.btn.light, p)) UI.hover = "light"; else if (inside(L.btn.brief, p)) UI.hover = "brief"; else { var d = dpadRects(); for (var key in d) if (inside(d[key], p)) { UI.hover = key; break; } } return; }
+    if (G.scene === "dive") { var bb = L.btn; if (inside(bb.ping, p)) UI.hover = "ping"; else if (inside(bb.light, p)) UI.hover = "light"; else if (inside(bb.excavate, p)) UI.hover = "excavate"; else if (inside(bb.patch, p)) UI.hover = "patch"; else if (inside(bb.crank, p)) UI.hover = "crank"; else if (inside(bb.brief, p)) UI.hover = "brief"; else { var d = dpadRects(); for (var key in d) if (inside(d[key], p)) { UI.hover = key; break; } } return; }
+    if (G.scene === "rig") { for (var si = 0; si < UI.shopHit.length; si++) if (inside(UI.shopHit[si].r, p)) { UI.hover = "buy" + UI.shopHit[si].id; return; } if (inside(UI.diveBtn, p)) UI.hover = "dive"; else if (inside(UI.briefBtn, p)) UI.hover = "brief"; else if (inside(UI.backBtn, p)) UI.hover = "back"; return; }
     if (G.scene === "end") { if (inside(UI.contBtn, p)) UI.hover = "cont"; return; }
     for (var m = 0; m < UI.menu.length; m++) if (inside(UI.menu[m].r, p)) UI.hover = "m" + m;
   }
@@ -465,9 +574,13 @@
       else if (code === "Space") { ping(); e.preventDefault(); }
       else if (code === "KeyF") { flagFaced(); e.preventDefault(); }
       else if (code === "KeyL") { toggleLight(); e.preventDefault(); }
+      else if (code === "KeyE") { excavate(); e.preventDefault(); }
+      else if (code === "KeyC") { crank(); e.preventDefault(); }
+      else if (code === "KeyP") { patch(); e.preventDefault(); }
       else if (code === "Escape") { UI.overlay = "options"; }
-    } else if (G.scene === "end") { if (code === "Enter" || code === "Space") { startRun(); e.preventDefault(); } }
-    else { if (code === "Enter" || code === "Space") { startRun(); e.preventDefault(); } }
+    } else if (G.scene === "rig") { if (code === "Enter" || code === "Space") { startRun(); e.preventDefault(); } else if (code === "Escape") { UI.overlay = "options"; } }
+    else if (G.scene === "end") { if (code === "Enter" || code === "Space") { G.scene = "rig"; e.preventDefault(); } }
+    else { if (code === "Enter" || code === "Space") { G.scene = "rig"; e.preventDefault(); } }
   });
 
   var padPrev = {};
@@ -480,10 +593,13 @@
         if (pressed(12) || (ax[1] < -0.5 && !padPrev._u)) tryDrive(0, -1); if (pressed(13) || (ax[1] > 0.5 && !padPrev._d)) tryDrive(0, 1);
         if (pressed(14) || (ax[0] < -0.5 && !padPrev._l)) tryDrive(-1, 0); if (pressed(15) || (ax[0] > 0.5 && !padPrev._r)) tryDrive(1, 0);
         padPrev._u = ax[1] < -0.5; padPrev._d = ax[1] > 0.5; padPrev._l = ax[0] < -0.5; padPrev._r = ax[0] > 0.5;
-        if (pressed(0)) ping(); if (pressed(2)) flagFaced(); if (pressed(1)) toggleLight(); if (pressed(3) || pressed(9)) UI.overlay = "help";
-      } else if (G.scene === "end") { if (pressed(0) || pressed(9)) startRun(); }
+        if (pressed(0)) ping(); if (pressed(2)) flagFaced(); if (pressed(1)) toggleLight(); if (pressed(3)) excavate(); if (pressed(4)) patch(); if (pressed(5)) crank(); if (pressed(9)) UI.overlay = "help";
+      } else if (G.scene === "rig") {
+        if (pressed(12)) G.shopFocus = (G.shopFocus + SHOP.length - 1) % SHOP.length; if (pressed(13)) G.shopFocus = (G.shopFocus + 1) % SHOP.length;
+        if (pressed(0)) buy(SHOP[G.shopFocus].id); if (pressed(9)) startRun(); if (pressed(1)) UI.overlay = "options"; if (pressed(3)) UI.overlay = "help";
+      } else if (G.scene === "end") { if (pressed(0) || pressed(9)) G.scene = "rig"; }
       else { if (pressed(12)) G.menuSel = (G.menuSel + UI.menu.length - 1) % (UI.menu.length || 1); if (pressed(13)) G.menuSel = (G.menuSel + 1) % (UI.menu.length || 1);
-        if (pressed(0) || pressed(9)) { var act = UI.menu[G.menuSel] ? UI.menu[G.menuSel].act : "dive"; if (act === "dive") startRun(); else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; } }
+        if (pressed(0) || pressed(9)) { var act = UI.menu[G.menuSel] ? UI.menu[G.menuSel].act : "dive"; if (act === "dive") G.scene = "rig"; else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; } }
       for (var i = 0; i < b.length; i++) padPrev[i] = b[i] && b[i].pressed;
     }
   }
@@ -502,5 +618,5 @@
   }
 
   newRun(randomSeed()); resize(); requestAnimationFrame(frame);
-  window.DREADNOUGHT = { G: function () { return G; }, newRun: newRun, startRun: startRun, drive: tryDrive, ping: ping, flagFaced: flagFaced, toggleLight: toggleLight, OPT: OPT };
+  window.DREADNOUGHT = { G: function () { return G; }, newRun: newRun, startRun: startRun, drive: tryDrive, ping: ping, flagFaced: flagFaced, toggleLight: toggleLight, excavate: excavate, patch: patch, crank: crank, surface: surface, buy: buy, buyPlushie: buyPlushie, OPT: OPT };
 })();

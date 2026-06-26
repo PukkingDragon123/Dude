@@ -20,7 +20,29 @@
     panic: 82,               // threat at which the deep fully notices you
     stalkerStep: 1,          // cells a stalker closes per player move
     layers: 6,               // descend 6 layers; the deepest holds the Source
+    startPatches: 2,         // hull patch kits carried (hands-on leak repair)
+    patchAmount: 32,         // hull restored per patch
+    tetherCells: 0,          // 0 = whole grid is the winch reach (the grid IS the tether radius)
   };
+
+  // ---- oil-rig OUTFITTER: equipment upgrades (persistent) bought with banked haul ----
+  var SHOP = [
+    { id: "hull",  name: "Reinforced Hull",  costs: [120, 300, 650],  vals: [130, 165, 200], unit: "max hull", desc: "Welded pressure plating. Survive deeper strikes." },
+    { id: "o2",    name: "O₂ Scrubbers",     costs: [120, 300, 650],  vals: [260, 320, 380], unit: "max air",  desc: "Bigger tanks. More air per descent." },
+    { id: "pings", name: "Sonar Capacitor",  costs: [150, 420],       vals: [4, 5],          unit: "pings/layer", desc: "More sounding charges to deduce at range." },
+    { id: "patch", name: "Patch Kits ×2",    costs: [80],             vals: [2],             unit: "", repeat: true, desc: "Two more hull patches. Seal a leak by hand mid-dive." },
+    { id: "bilge", name: "Bilge Pump",       costs: [260],            vals: [1],             unit: "", desc: "Pumps the cabin: flooding rises far slower." },
+    { id: "light", name: "Floodlight",       costs: [200],            vals: [1],             unit: "", desc: "Brighter beam, quieter rig — the dark sees you less." },
+  ];
+
+  // ---- cute cabin DECORATIONS (cosmetic morale; shown hanging in the cockpit) ----
+  var PLUSHIES = [
+    { id: "duck",  name: "Rubber Duck",      cost: 40, col: "#e0a32e" },
+    { id: "bear",  name: "Teddy Bear",       cost: 55, col: "#b8703a" },
+    { id: "angler",name: "Plush Anglerfish", cost: 70, col: "#46f0c8" },
+    { id: "squid", name: "Plush Squid",      cost: 70, col: "#c3aeff" },
+    { id: "jelly", name: "Plush Jellyfish",  cost: 80, col: "#9cffe6" },
+  ];
 
   // ---- per-layer grid config (index 1..6). monsters/loot/vents are cell counts. ----
   var LAYERS = [
@@ -67,5 +89,7 @@
   root.DN.LAYERS = LAYERS;
   root.DN.MONSTERS = MONSTERS;
   root.DN.LOOT = LOOT;
+  root.DN.SHOP = SHOP;
+  root.DN.PLUSHIES = PLUSHIES;
   root.DN.LORE = LORE;
 })(typeof window !== "undefined" ? window : this);
