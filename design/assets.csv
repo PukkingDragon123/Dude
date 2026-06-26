@@ -1,0 +1,21 @@
+id,role,type,description,size_ratio,style_ref,source
+bg_cockpit,Full-frame cockpit frame rendered behind the sonar HUD,background,Cramped Russian submarine interior with riveted steel walls pipes valves a large central dark round monitor bezel analog gauges and a hanging caged lamp,16:9,STYLE_FORMULA,generate
+bg_abyss,Parallax abyss shown inside the viewport tinted darker by depth,background,Pitch-black abyssal ocean trench with suspended marine snow and a distant murky teal glow far below,16:9,STYLE_FORMULA,generate
+bg_title,Title and menu splash image,background,A lone small Russian submarine descending into a vast black ocean trench dwarfed by darkness with faint cyan bioluminescence and empty space at the top for a title,16:9,STYLE_FORMULA,generate
+creature_angler,Common predator contact portrait keyed to transparent,sprite,A horrifying abyssal anglerfish monster with gaping needle-tooth jaws a glowing lure and a slick dark scaled body,1:1,STYLE_FORMULA,generate
+creature_leviathan,Boss leviathan contact portrait keyed to transparent,sprite,A colossal deep-sea leviathan an immense tentacled whale-like horror with scarred ancient hide and glowing eyes,1:1,STYLE_FORMULA,generate
+creature_pale,Anomaly creature contact portrait keyed to transparent,sprite,A pale eyeless humanoid swimmer with gaunt elongated limbs and translucent skin an unsettling deep-sea anomaly,1:1,STYLE_FORMULA,generate
+contact_wreck,Wreck contact portrait keyed to transparent,sprite,A broken sunken submarine wreck a twisted rusted hull snapped in half and draped in sediment,1:1,STYLE_FORMULA,generate
+contact_artifact,Artifact contact portrait keyed to transparent,sprite,A strange angular obsidian alien monolith artifact carved with faint glowing glyphs standing upright,1:1,STYLE_FORMULA,generate
+contact_anomaly,Anomaly contact portrait keyed to transparent,sprite,A glowing deep-sea anomaly a swirling rift of sickly cyan-green light and distortion formless eerie energy,1:1,STYLE_FORMULA,generate
+music_ambient,Looping exploration ambience bed,audio-music,Deep oppressive dark ambient drone with low sub-bass rumble distant metallic groans and sonar echoes no melody,40s,n/a,generate
+music_threat,Looping monster-encounter track,audio-music,Intense rising horror sting and pulsing low strings dissonant dread-filled building panic,30s,n/a,generate
+sfx_ping,Sonar ping action feedback,audio-sfx,A single submarine sonar ping a clean electronic pwong with a long watery echo tail,2s,n/a,generate
+sfx_alert,New contact detected cue,audio-sfx,A tense low alarm klaxon blip warning of a nearby contact two short muffled buzzes,2s,n/a,generate
+sfx_damage,Hull damage feedback,audio-sfx,A heavy metallic hull impact and deep groaning stress of bending steel underwater,3s,n/a,generate
+sfx_card,Card play and toggle feedback,audio-sfx,A short tactile click-clunk of a heavy mechanical toggle switch being flipped,1s,n/a,generate
+sfx_roar,Creature reveal and attack sting,audio-sfx,A distant monstrous deep-sea moan a vast whale-like bellow distorted and terrifying reverberating through water,4s,n/a,generate
+sonar_scope,Procedural CRT sonar scope drawn in canvas inside the cockpit monitor,procedural-canvas,Round green phosphor sonar display with sweep line range rings dither and contact blips,vector,STYLE_FORMULA,procedural
+hud_gauges,Procedural gauges and bars for hull oxygen sanity and power,procedural-canvas,Amber CRT readouts and segmented bars with riveted gunmetal housings,vector,STYLE_FORMULA,procedural
+card_frames,Procedural card frames cost pips and glyph icons drawn in canvas,procedural-canvas,Gunmetal card plates with amber labels cyan glyphs and blood-red warning trim,vector,STYLE_FORMULA,procedural
+fx_overlay,Procedural post overlay scanlines vignette fog dither grain and particles,procedural-canvas,CRT scanlines heavy dark vignette murky fog ordered-dither grain and drifting marine snow,vector,STYLE_FORMULA,procedural
