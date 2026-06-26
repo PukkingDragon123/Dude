@@ -574,6 +574,46 @@
     var bg = ctx.createLinearGradient(0, 0, 0, bh);
     bg.addColorStop(0, lightOn ? "#123843" : "#0c2632"); bg.addColorStop(0.55, "#072027"); bg.addColorStop(1, "#03121a");
     ctx.fillStyle = bg; ctx.fillRect(0, 0, bw, bh);
+
+    // ---------- ACTUAL 3D TRENCH: a canyon corridor we descend, walls + floor receding to a vanishing point ----------
+    (function () {
+      var halfW = 1.02, floorY = 0.86, topY = -1.32;
+      var nSlice = 18, near = 1.12, farD = Math.max(18, range * 1.3), ratio = farD / near;
+      var scroll = (t * 0.8) % 1;                          // depth slices flow toward us = forward motion
+      function P(wx, wy, z) { var f = focal / z; return [cx + wx * f, cy + wy * f]; }
+      function fog(z) { return Math.max(0, Math.min(1, 1 - (z - near) / (farD - near))); }
+      var amb = lightOn ? 0.9 : 0.52;
+      function shade(z, surf) { var b = (0.16 + fog(z) * 0.84) * amb * surf;
+        return "rgb(" + ((6 + 36 * b) | 0) + "," + ((20 + 66 * b) | 0) + "," + ((27 + 60 * b) | 0) + ")"; }
+      var SL = [];
+      for (var s = 0; s <= nSlice; s++) {
+        var p = (s + scroll) / nSlice, z = near * Math.pow(ratio, p);
+        var hw = halfW + Math.sin(z * 1.7) * 0.07 + Math.sin(z * 0.66 + 1.3) * 0.05;   // rocky wobble keyed to world-depth (stable as it flows)
+        var ty = topY + Math.sin(z * 1.05 + 2.0) * 0.14 + Math.sin(z * 2.3) * 0.06;
+        SL.push({ z: z, FL: P(-hw, floorY, z), FR: P(hw, floorY, z), TL: P(-hw, ty, z), TR: P(hw, ty, z) });
+      }
+      function quad(a, b, c, d, col) { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.stroke(); }
+      for (var k = nSlice - 1; k >= 0; k--) {                  // painter: far band first
+        var n0 = SL[k], f0 = SL[k + 1], fz = f0.z;
+        quad(n0.FL, n0.FR, f0.FR, f0.FL, shade(fz, 1.0));      // floor
+        quad(n0.FL, n0.TL, f0.TL, f0.FL, shade(fz, 0.58));     // left wall (in shadow)
+        quad(n0.FR, n0.TR, f0.TR, f0.FR, shade(fz, 0.78));     // right wall (lit side)
+      }
+      // depth ribs + seams for crisp 3D readout
+      ctx.lineCap = "round";
+      for (var r2 = 0; r2 < SL.length; r2 += 1) { var sl = SL[r2], a = (0.05 + fog(sl.z) * 0.22) * amb; if (a < 0.02) continue;
+        ctx.strokeStyle = "rgba(120,200,205," + a.toFixed(3) + ")"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(sl.TL[0], sl.TL[1]); ctx.lineTo(sl.FL[0], sl.FL[1]); ctx.lineTo(sl.FR[0], sl.FR[1]); ctx.lineTo(sl.TR[0], sl.TR[1]); ctx.stroke(); }
+      // longitudinal seams (floor/wall edges + a floor centre channel) running to the vanishing point
+      ctx.strokeStyle = "rgba(110,190,195,0.16)"; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(SL[0].FL[0], SL[0].FL[1]); ctx.lineTo(SL[nSlice].FL[0], SL[nSlice].FL[1]);
+      ctx.moveTo(SL[0].FR[0], SL[0].FR[1]); ctx.lineTo(SL[nSlice].FR[0], SL[nSlice].FR[1]); ctx.stroke();
+      // murk swallowing the deep end (vanishing-point haze)
+      var vp = SL[nSlice], hz = ctx.createRadialGradient((vp.FL[0] + vp.FR[0]) / 2, (vp.FL[1] + vp.TL[1]) / 2, 2, (vp.FL[0] + vp.FR[0]) / 2, (vp.FL[1] + vp.TL[1]) / 2, bh * 0.5);
+      hz.addColorStop(0, lightOn ? "rgba(14,52,60,0.9)" : "rgba(6,28,36,0.92)"); hz.addColorStop(1, "rgba(6,28,36,0)");
+      ctx.fillStyle = hz; ctx.fillRect(0, 0, bw, bh);
+    })();
+
     // god-rays slanting from the surface
     ctx.save(); ctx.globalAlpha = lightOn ? 0.12 : 0.07;
     for (var gr = 0; gr < 4; gr++) { var rxp = bw * (0.18 + gr * 0.22) + Math.sin(t * 0.2 + gr) * bw * 0.03;
@@ -760,47 +800,49 @@
   // o: { yaw, pitch, mouth(0..1), t, lit(0..1) }
   function drawAngler3D(ctx, cx, cy, size, o) {
     o = o || {}; var yaw = o.yaw || 0, pitch = o.pitch || 0, mouth = o.mouth == null ? 0.25 : o.mouth, t = o.t || 0, lit = o.lit == null ? 1 : o.lit, camZ = 3.05;
-    var M = anglerMesh(), light = v3norm([0.4, 0.5, -0.85]);
+    var M = anglerMesh(), light = v3norm([0.22, 0.55, -0.8]);
     function tp(v) { var r = rot3(v, yaw, pitch); var z = r[2] + camZ; if (z < 0.25) z = 0.25; var f = size / z; return [cx + r[0] * f, cy - r[1] * f, z, r]; }
-    var BODY = [44, 78, 86], DARK = [8, 18, 22];
-    var drawn = [];
+    var LO = [8, 15, 18], HI = [44, 72, 78]; // dark wet flesh — never bright
+    var drawn = [], minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
     for (var i = 0; i < M.faces.length; i++) { var f = M.faces[i]; var p = [tp(f[0]), tp(f[1]), tp(f[2]), tp(f[3])];
       var n = v3norm(v3cross(v3sub(p[1][3], p[0][3]), v3sub(p[2][3], p[0][3])));
-      var sh = Math.max(0.12, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]);
+      var sh = Math.max(0, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]);
+      for (var b = 0; b < 4; b++) { if (p[b][0] < minx) minx = p[b][0]; if (p[b][0] > maxx) maxx = p[b][0]; if (p[b][1] < miny) miny = p[b][1]; if (p[b][1] > maxy) maxy = p[b][1]; }
       drawn.push({ p: p, z: (p[0][2] + p[1][2] + p[2][2] + p[3][2]) / 4, sh: sh }); }
     drawn.sort(function (a, b) { return b.z - a.z; });
-    for (var d2 = 0; d2 < drawn.length; d2++) { var dn = drawn[d2], k = (0.35 + dn.sh * 0.65) * (0.5 + lit * 0.5);
-      ctx.fillStyle = "rgb(" + Math.round(DARK[0] + (BODY[0] - DARK[0]) * k) + "," + Math.round(DARK[1] + (BODY[1] - DARK[1]) * k) + "," + Math.round(DARK[2] + (BODY[2] - DARK[2]) * k) + ")";
-      ctx.beginPath(); ctx.moveTo(dn.p[0][0], dn.p[0][1]); for (var q = 1; q < 4; q++) ctx.lineTo(dn.p[q][0], dn.p[q][1]); ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = "rgba(0,0,0,0.22)"; ctx.lineWidth = 1; ctx.stroke(); }
-    // ---- gaping maw at the head front ----
+    // fill smooth (no facet edges) — overlap slightly to hide seams
+    for (var d2 = 0; d2 < drawn.length; d2++) { var dn = drawn[d2], k = (0.14 + dn.sh * dn.sh * 0.86) * (0.42 + lit * 0.58);
+      ctx.fillStyle = "rgb(" + Math.round(LO[0] + (HI[0] - LO[0]) * k) + "," + Math.round(LO[1] + (HI[1] - LO[1]) * k) + "," + Math.round(LO[2] + (HI[2] - LO[2]) * k) + ")";
+      ctx.beginPath(); ctx.moveTo(dn.p[0][0], dn.p[0][1]); for (var q2 = 1; q2 < 4; q2++) ctx.lineTo(dn.p[q2][0], dn.p[q2][1]); ctx.closePath(); ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = ctx.fillStyle; ctx.stroke(); }
+    // silhouette fades into the black water (emerging from the deep)
+    var bcx = (minx + maxx) / 2, bcy = (miny + maxy) / 2, br = Math.max(maxx - minx, maxy - miny) * 0.62;
+    var vg = ctx.createRadialGradient(bcx, bcy, br * 0.4, bcx, bcy, br); vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(2,5,7," + (0.62 + (1 - lit) * 0.36).toFixed(2) + ")");
+    ctx.save(); ctx.fillStyle = vg; ctx.beginPath(); ctx.arc(bcx, bcy, br, 0, 7); ctx.fill(); ctx.restore();
+    // ---- gaping maw: black throat, deep red glow, long uneven teeth ----
     var head = tp([0, -0.02, M.headZ]), rim = tp([0, 0.5, M.headZ]);
-    var R = Math.max(4, Math.abs(head[1] - rim[1]) * 1.05);
-    var open = R * (0.32 + mouth * 1.5);
+    var R = Math.max(5, Math.abs(head[1] - rim[1]) * 1.12), open = R * (0.3 + mouth * 1.7);
     ctx.save(); ctx.translate(head[0], head[1]);
-    var mg = ctx.createRadialGradient(0, 0, 1, 0, 0, R * 1.2); mg.addColorStop(0, "#150305"); mg.addColorStop(0.7, "#0a0204"); mg.addColorStop(1, "rgba(10,2,4,0)");
-    ctx.fillStyle = mg; ctx.beginPath(); ctx.ellipse(0, 0, R * 0.95, open, 0, 0, 7); ctx.fill();
-    // red throat glow
-    ctx.fillStyle = "rgba(150,20,25," + (0.25 + mouth * 0.35).toFixed(2) + ")"; ctx.beginPath(); ctx.ellipse(0, 0, R * 0.5, open * 0.55, 0, 0, 7); ctx.fill();
-    // teeth — needles top & bottom rim
-    var teeth = 9, tl = R * (0.22 + mouth * 0.18);
-    ctx.fillStyle = "#d9d2bf";
-    for (var tnum = 0; tnum < teeth; tnum++) { var fx = (tnum / (teeth - 1) - 0.5) * 1.7 * R;
-      poly(ctx, [[fx - R * 0.06, -open], [fx + R * 0.06, -open], [fx, -open + tl]], "#d9d2bf");        // upper
-      poly(ctx, [[fx - R * 0.06, open], [fx + R * 0.06, open], [fx, open - tl]], "#cfc7b2");            // lower
+    var mg = ctx.createRadialGradient(0, 0, 1, 0, 0, R * 1.25); mg.addColorStop(0, "#000000"); mg.addColorStop(0.6, "#070103"); mg.addColorStop(1, "rgba(4,1,2,0)");
+    ctx.fillStyle = mg; ctx.beginPath(); ctx.ellipse(0, 0, R * 1.02, open, 0, 0, 7); ctx.fill();
+    var rg = ctx.createRadialGradient(0, open * 0.18, 1, 0, open * 0.18, R * 0.7); rg.addColorStop(0, "rgba(150,18,22," + (0.28 + mouth * 0.4).toFixed(2) + ")"); rg.addColorStop(1, "rgba(70,4,8,0)");
+    ctx.fillStyle = rg; ctx.beginPath(); ctx.ellipse(0, open * 0.18, R * 0.58, open * 0.5, 0, 0, 7); ctx.fill();
+    var nt = 11;
+    for (var tn = 0; tn < nt; tn++) { var u = tn / (nt - 1), fx = (u - 0.5) * 1.85 * R;
+      var lnU = R * (0.3 + 0.5 * Math.abs(Math.sin(tn * 12.99))), lnL = R * (0.3 + 0.5 * Math.abs(Math.sin(tn * 7.13 + 1.7)));
+      var col = tn % 2 ? "#cbc2ad" : "#b3aa94";
+      poly(ctx, [[fx - R * 0.05, -open * 0.97], [fx + R * 0.05, -open * 0.97], [fx + (u - 0.5) * R * 0.25, -open * 0.97 + lnU]], col);
+      poly(ctx, [[fx - R * 0.05, open * 0.97], [fx + R * 0.05, open * 0.97], [fx + (u - 0.5) * R * 0.25, open * 0.97 - lnL]], col);
     }
     ctx.restore();
-    // ---- eyes (glow) ----
-    var e1 = tp([-0.28, 0.24, 0.5]), e2 = tp([0.28, 0.24, 0.5]), er = Math.max(2, R * 0.12);
-    var eg = o.boss ? PAL.bloodHi : PAL.bio;
-    glowDot(ctx, e1[0], e1[1], er * 2.4, eg, 0.9 * lit + 0.1); glowDot(ctx, e2[0], e2[1], er * 2.4, eg, 0.9 * lit + 0.1);
-    ctx.fillStyle = eg; ctx.beginPath(); ctx.arc(e1[0], e1[1], er, 0, 7); ctx.arc(e2[0], e2[1], er, 0, 7); ctx.fill();
-    ctx.fillStyle = "#040608"; ctx.beginPath(); ctx.arc(e1[0], e1[1], er * 0.45, 0, 7); ctx.arc(e2[0], e2[1], er * 0.45, 0, 7); ctx.fill();
-    // ---- lure: stalk from the brow with a glowing bulb ----
-    var brow = tp([0, 0.5, 0.45]), tip = tp([0, 1.05 + Math.sin(t * 2) * 0.06, 0.9]);
-    ctx.strokeStyle = "#1c2a30"; ctx.lineWidth = Math.max(1.5, R * 0.06); ctx.beginPath(); ctx.moveTo(brow[0], brow[1]); ctx.quadraticCurveTo(brow[0] + (tip[0] - brow[0]) * 0.4, brow[1] - R * 0.6, tip[0], tip[1]); ctx.stroke();
-    var lb = Math.max(2.5, R * 0.18); glowDot(ctx, tip[0], tip[1], lb * 2.6, PAL.bioHi, 0.7 + 0.3 * Math.sin(t * 5));
-    ctx.fillStyle = PAL.bioHi; ctx.beginPath(); ctx.arc(tip[0], tip[1], lb, 0, 7); ctx.fill();
+    // ---- small dead eyes (dim, pale — not glowing orbs) ----
+    var e1 = tp([-0.25, 0.27, 0.44]), e2 = tp([0.25, 0.27, 0.44]), er = Math.max(1.5, R * 0.085);
+    ctx.fillStyle = "rgba(150,162,150," + (0.45 * lit + 0.18).toFixed(2) + ")"; ctx.beginPath(); ctx.arc(e1[0], e1[1], er, 0, 7); ctx.arc(e2[0], e2[1], er, 0, 7); ctx.fill();
+    ctx.fillStyle = "#020304"; ctx.beginPath(); ctx.arc(e1[0], e1[1], er * 0.5, 0, 7); ctx.arc(e2[0], e2[1], er * 0.5, 0, 7); ctx.fill();
+    // ---- lure: the single bright focal point in all that dark ----
+    var brow = tp([0, 0.55, 0.4]), tip = tp([0, 1.18 + Math.sin(t * 2) * 0.07, 0.82]);
+    ctx.strokeStyle = "#0c1216"; ctx.lineWidth = Math.max(1.5, R * 0.05); ctx.beginPath(); ctx.moveTo(brow[0], brow[1]); ctx.quadraticCurveTo(brow[0] + (tip[0] - brow[0]) * 0.4, brow[1] - R * 0.75, tip[0], tip[1]); ctx.stroke();
+    var lb = Math.max(2.5, R * 0.15); glowDot(ctx, tip[0], tip[1], lb * 3.4, PAL.bioHi, 0.7 + 0.3 * Math.sin(t * 5));
+    ctx.fillStyle = "#eafff4"; ctx.beginPath(); ctx.arc(tip[0], tip[1], lb, 0, 7); ctx.fill();
   }
 
   // ---------- THE BLOOP — a colossal 3D horror (its own mesh: huge, pale, many-eyed, tendrilled) ----------
@@ -821,44 +863,59 @@
   }
   function drawBloop3D(ctx, cx, cy, size, o) {
     o = o || {}; var yaw = o.yaw || 0, pitch = o.pitch || 0, mouth = o.mouth == null ? 0.3 : o.mouth, t = o.t || 0, lit = o.lit == null ? 1 : o.lit, camZ = 3.2;
-    var M = bloopMesh(), light = v3norm([0.3, 0.5, -0.85]);
+    var M = bloopMesh(), light = v3norm([0.26, 0.5, -0.82]);
     function tp(v) { var r = rot3(v, yaw, pitch); var z = r[2] + camZ; if (z < 0.25) z = 0.25; var f = size / z; return [cx + r[0] * f, cy - r[1] * f, z, r]; }
-    var BODY = [120, 116, 150], DARK = [18, 14, 30];
-    // drifting tendrils first (behind the body)
+    // sickly dead-flesh: almost black in shadow, only the crests catch a cold pallor — never the old candy-purple
+    var LO = [9, 13, 13], HI = [74, 84, 78];
+    // heavy, dark tendrils sinking into the black behind the body
     ctx.save(); ctx.lineCap = "round";
-    for (var td = 0; td < 7; td++) { var ba = (td / 7 - 0.5) * 2.2; var base = tp([Math.cos(ba) * 0.5, -0.9, 0.1]); var sway = Math.sin(t * 1.3 + td) * size * 0.22;
-      var midx = base[0] + sway, tipx = base[0] + sway * 1.8 + (td - 3) * size * 0.04, tipy = base[1] + size * (0.7 + 0.3 * Math.abs(Math.sin(t + td)));
-      ctx.strokeStyle = "rgba(90,84,120," + (0.5 * lit + 0.1).toFixed(2) + ")"; ctx.lineWidth = Math.max(1.5, size * 0.03);
-      ctx.beginPath(); ctx.moveTo(base[0], base[1]); ctx.quadraticCurveTo(midx, base[1] + size * 0.4, tipx, tipy); ctx.stroke(); }
+    for (var td = 0; td < 8; td++) { var ba = (td / 8 - 0.5) * 2.4; var base = tp([Math.cos(ba) * 0.55, -0.85, 0.05]); var sway = Math.sin(t * 0.9 + td * 1.3) * size * 0.26;
+      var midx = base[0] + sway, tipx = base[0] + sway * 1.7 + (td - 3.5) * size * 0.05, tipy = base[1] + size * (0.9 + 0.45 * Math.abs(Math.sin(t * 0.8 + td)));
+      ctx.strokeStyle = "rgba(14,22,22," + (0.55 * lit + 0.25).toFixed(2) + ")"; ctx.lineWidth = Math.max(2, size * 0.05 * (1 - td / 16));
+      ctx.beginPath(); ctx.moveTo(base[0], base[1]); ctx.quadraticCurveTo(midx, base[1] + size * 0.45, tipx, tipy); ctx.stroke(); }
     ctx.restore();
-    // body
-    var drawn = [];
+    // body — smooth (stroke==fill hides facets), track bbox for the edge-darkening
+    var drawn = [], minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
     for (var i = 0; i < M.faces.length; i++) { var f = M.faces[i]; var p = [tp(f[0]), tp(f[1]), tp(f[2]), tp(f[3])];
       var n = v3norm(v3cross(v3sub(p[1][3], p[0][3]), v3sub(p[2][3], p[0][3])));
-      var sh = Math.max(0.14, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]);
+      var sh = Math.max(0, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]);
+      for (var b = 0; b < 4; b++) { if (p[b][0] < minx) minx = p[b][0]; if (p[b][0] > maxx) maxx = p[b][0]; if (p[b][1] < miny) miny = p[b][1]; if (p[b][1] > maxy) maxy = p[b][1]; }
       drawn.push({ p: p, z: (p[0][2] + p[1][2] + p[2][2] + p[3][2]) / 4, sh: sh }); }
     drawn.sort(function (a, b) { return b.z - a.z; });
-    for (var d2 = 0; d2 < drawn.length; d2++) { var dn = drawn[d2], k = (0.3 + dn.sh * 0.7) * (0.45 + lit * 0.55);
-      ctx.fillStyle = "rgb(" + Math.round(DARK[0] + (BODY[0] - DARK[0]) * k) + "," + Math.round(DARK[1] + (BODY[1] - DARK[1]) * k) + "," + Math.round(DARK[2] + (BODY[2] - DARK[2]) * k) + ")";
-      ctx.beginPath(); ctx.moveTo(dn.p[0][0], dn.p[0][1]); for (var q = 1; q < 4; q++) ctx.lineTo(dn.p[q][0], dn.p[q][1]); ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = "rgba(0,0,0,0.18)"; ctx.lineWidth = 1; ctx.stroke(); }
-    // cavernous maw
-    var head = tp([0, -0.05, M.headZ]), rim = tp([0, 0.6, M.headZ]); var R = Math.max(6, Math.abs(head[1] - rim[1]) * 1.15);
-    var open = R * (0.4 + mouth * 1.6);
+    for (var d2 = 0; d2 < drawn.length; d2++) { var dn = drawn[d2], k = (0.1 + dn.sh * dn.sh * 0.9) * (0.34 + lit * 0.66);
+      ctx.fillStyle = "rgb(" + Math.round(LO[0] + (HI[0] - LO[0]) * k) + "," + Math.round(LO[1] + (HI[1] - LO[1]) * k) + "," + Math.round(LO[2] + (HI[2] - LO[2]) * k) + ")";
+      ctx.beginPath(); ctx.moveTo(dn.p[0][0], dn.p[0][1]); for (var q = 1; q < 4; q++) ctx.lineTo(dn.p[q][0], dn.p[q][1]); ctx.closePath(); ctx.fill(); ctx.lineWidth = 1.4; ctx.strokeStyle = ctx.fillStyle; ctx.stroke(); }
+    // the colossus dissolves into the black at its edges — only a core mass is ever lit (sense of vast unseen scale)
+    var bcx = (minx + maxx) / 2, bcy = (miny + maxy) / 2, br = Math.max(maxx - minx, maxy - miny) * 0.66;
+    var bv = ctx.createRadialGradient(bcx, bcy, br * 0.32, bcx, bcy, br); bv.addColorStop(0, "rgba(0,0,0,0)"); bv.addColorStop(1, "rgba(1,4,5," + (0.74 + (1 - lit) * 0.24).toFixed(2) + ")");
+    ctx.save(); ctx.fillStyle = bv; ctx.beginPath(); ctx.arc(bcx, bcy, br, 0, 7); ctx.fill(); ctx.restore();
+    // ---- cavernous maw: a black pit, dim blood-glow far down its throat, long uneven fangs ----
+    var head = tp([0, -0.05, M.headZ]), rim = tp([0, 0.6, M.headZ]); var R = Math.max(6, Math.abs(head[1] - rim[1]) * 1.2);
+    var open = R * (0.45 + mouth * 1.7);
     ctx.save(); ctx.translate(head[0], head[1]);
-    var mg = ctx.createRadialGradient(0, 0, 1, 0, 0, R * 1.3); mg.addColorStop(0, "#1a0510"); mg.addColorStop(0.6, "#0c0308"); mg.addColorStop(1, "rgba(8,2,8,0)");
-    ctx.fillStyle = mg; ctx.beginPath(); ctx.ellipse(0, 0, R * 1.0, open, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = "rgba(150,30,70," + (0.22 + mouth * 0.4).toFixed(2) + ")"; ctx.beginPath(); ctx.ellipse(0, 0, R * 0.55, open * 0.6, 0, 0, 7); ctx.fill();
-    var teeth = 11, tl = R * (0.2 + mouth * 0.16); ctx.fillStyle = "#cabfb0";
-    for (var tn = 0; tn < teeth; tn++) { var fx = (tn / (teeth - 1) - 0.5) * 1.8 * R; poly(ctx, [[fx - R * 0.05, -open], [fx + R * 0.05, -open], [fx, -open + tl]], "#cabfb0"); poly(ctx, [[fx - R * 0.05, open], [fx + R * 0.05, open], [fx, open - tl]], "#bfb4a4"); }
+    var mg = ctx.createRadialGradient(0, 0, 1, 0, 0, R * 1.35); mg.addColorStop(0, "#000000"); mg.addColorStop(0.62, "#060103"); mg.addColorStop(1, "rgba(4,1,2,0)");
+    ctx.fillStyle = mg; ctx.beginPath(); ctx.ellipse(0, 0, R * 1.04, open, 0, 0, 7); ctx.fill();
+    var rgg = ctx.createRadialGradient(0, open * 0.2, 1, 0, open * 0.2, R * 0.78); rgg.addColorStop(0, "rgba(135,16,26," + (0.24 + mouth * 0.42).toFixed(2) + ")"); rgg.addColorStop(1, "rgba(60,4,8,0)");
+    ctx.fillStyle = rgg; ctx.beginPath(); ctx.ellipse(0, open * 0.2, R * 0.6, open * 0.52, 0, 0, 7); ctx.fill();
+    var teeth = 13;
+    for (var tn = 0; tn < teeth; tn++) { var u = tn / (teeth - 1), fx = (u - 0.5) * 1.9 * R;
+      var lnU = R * (0.26 + 0.62 * Math.abs(Math.sin(tn * 12.99 + 0.4))), lnL = R * (0.26 + 0.62 * Math.abs(Math.sin(tn * 7.13 + 2.1)));
+      var col = tn % 2 ? "#c7bca6" : "#aea48e";
+      poly(ctx, [[fx - R * 0.045, -open * 0.98], [fx + R * 0.045, -open * 0.98], [fx + (u - 0.5) * R * 0.3, -open * 0.98 + lnU]], col);
+      poly(ctx, [[fx - R * 0.045, open * 0.98], [fx + R * 0.045, open * 0.98], [fx + (u - 0.5) * R * 0.3, open * 0.98 - lnL]], col);
+    }
     ctx.restore();
-    // a CLUSTER of many glowing eyes on the upper body
-    var eyePos = [[-0.4, 0.45, 0.45], [0.4, 0.45, 0.45], [-0.18, 0.62, 0.5], [0.18, 0.62, 0.5], [0, 0.4, 0.6], [-0.55, 0.2, 0.35], [0.55, 0.2, 0.35]];
-    var eg = PAL.bioHi, er = Math.max(1.5, R * 0.09);
-    for (var e = 0; e < eyePos.length; e++) { var ep = tp(eyePos[e]); var bl = 0.5 + 0.5 * Math.sin(t * 2.5 + e * 1.7);
-      glowDot(ctx, ep[0], ep[1], er * 2.6, eg, (0.7 * lit + 0.2) * bl); ctx.fillStyle = eg; ctx.beginPath(); ctx.arc(ep[0], ep[1], er, 0, 7); ctx.fill(); ctx.fillStyle = "#06040a"; ctx.beginPath(); ctx.arc(ep[0], ep[1], er * 0.4, 0, 7); ctx.fill(); }
-    // overall pale aura
-    ctx.save(); ctx.globalAlpha = 0.18 * lit; glowDot(ctx, head[0], head[1], R * 2.2, PAL.violetHi, 1); ctx.restore();
+    // ---- a scatter of huge, dim, dead eyes — asymmetric, sunken, milky (not a tidy glowing ring) ----
+    var eyePos = [[-0.46, 0.5, 0.42, 1.0], [0.28, 0.6, 0.5, 0.7], [0.55, 0.34, 0.32, 0.85], [-0.2, 0.3, 0.58, 0.55], [0.08, 0.74, 0.46, 0.45]];
+    for (var e = 0; e < eyePos.length; e++) { var ep = tp(eyePos[e]); var es = eyePos[e][3], er = Math.max(1.6, R * 0.075 * (0.7 + es)); var bl = 0.4 + 0.35 * Math.sin(t * 1.3 + e * 2.1);
+      // sunken socket
+      ctx.fillStyle = "rgba(4,7,7,0.85)"; ctx.beginPath(); ctx.arc(ep[0], ep[1], er * 1.7, 0, 7); ctx.fill();
+      // milky dead sclera with only a faint sick glow
+      glowDot(ctx, ep[0], ep[1], er * 1.8, "#3a5a4e", (0.2 * lit + 0.1) * bl * es);
+      ctx.fillStyle = "rgba(150,162,150," + (0.4 * lit + 0.16).toFixed(2) + ")"; ctx.beginPath(); ctx.arc(ep[0], ep[1], er, 0, 7); ctx.fill();
+      // dead vertical slit pupil
+      ctx.fillStyle = "#020403"; ctx.beginPath(); ctx.ellipse(ep[0], ep[1], er * 0.32, er * 0.78, 0, 0, 7); ctx.fill();
+    }
   }
 
   // ---------- cute cabin plushies (morale decor) ----------
