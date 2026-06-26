@@ -1,18 +1,17 @@
-/* DREADNOUGHT v3 — Iron-Lung-style deep-sea horror.
- * Trapped in a tiny sub in the black. Navigate by RADAR: ping to classify contacts,
- * thrust through 3D water toward loot, peek with the headlight, avoid the things below.
- * Depends (load order): strings.js, rng.js, data.js, audio.js, art.js. No shop, no upgrades. */
+/* DREADNOUGHT v4 — Minesweeper-deduction fused into first-person submarine navigation.
+ * The CRT monitor is a top-down sonar grid; the sub is one cell. Drive (W/A/S/D) to move —
+ * entering a cell reveals it (numbers = adjacent monsters). PING reveals numbers in a cone.
+ * Drive into a monster = jumpscare + hull breach; hull shows as the cabin FLOODING. No text HUD.
+ * Depends (load order): strings.js, rng.js, data.js, audio.js, art.js. */
 (function () {
   "use strict";
-  var CFG = DN.CFG, LOOT = DN.LOOT, MON = DN.MONSTERS, SPAWN = DN.SPAWN, LORE = DN.LORE;
+  var CFG = DN.CFG, LAYERS = DN.LAYERS, MON = DN.MONSTERS, LOOT = DN.LOOT, LORE = DN.LORE;
   var Art = DN.Art, Audio = DN.Audio, S = window.STR, PAL = Art.PAL;
 
-  // ---------------- options ----------------
   var OPT = { sound: true, shake: true, scanlines: true };
   try { var o = JSON.parse(localStorage.getItem("dn_opt") || "{}"); for (var k in o) OPT[k] = o[k]; } catch (e) {}
   function saveOpt() { try { localStorage.setItem("dn_opt", JSON.stringify(OPT)); } catch (e) {} }
 
-  // ---------------- canvas ----------------
   var canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
   var buf = document.createElement("canvas"), bctx = buf.getContext("2d");
   var W = 0, H = 0, DPR_CAP = 1.5, dpr = 1, SCALE = 3;
@@ -27,222 +26,227 @@
     canvas.style.width = W + "px"; canvas.style.height = H + "px";
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     layout();
-    SCALE = Math.max(2, Math.round(L.scene.w / 460));
-    var bw = Math.max(180, Math.round(L.scene.w / SCALE)), bh = Math.max(120, Math.round(L.scene.h / SCALE));
+    var bw = Math.max(160, Math.round(L.porthole.w / SCALE2())), bh = Math.max(110, Math.round(L.porthole.h / SCALE2()));
     buf.width = bw; buf.height = bh; Art.rebake(bw, bh);
   }
+  function SCALE2() { SCALE = Math.max(2, Math.round(L.porthole.w / 360)); return SCALE; }
   window.addEventListener("resize", resize); window.addEventListener("orientationchange", resize);
 
   // ---------------- layout ----------------
-  var L = { scene: {}, top: {}, bottom: {}, btn: {} };
+  var L = { top: {}, col: {}, porthole: {}, monitor: {}, bottom: {}, btn: {}, tank: {}, depth: {}, dpad: {} };
   function layout() {
-    var portrait = H > W * 1.04;
-    var topH = clamp(H * 0.10, 42, 64);
-    var bottomH = portrait ? clamp(H * 0.30, 165, 300) : clamp(H * 0.30, 150, 232);
+    var portrait = H > W * 1.05;
+    var topH = clamp(H * 0.07, 28, 50);
+    var colW = clamp(W * 0.15, 84, 190);
+    var botH = portrait ? clamp(H * 0.20, 116, 220) : clamp(H * 0.19, 104, 184);
     L.top = { x: 0, y: 0, w: W, h: topH };
-    L.scene = { x: 0, y: topH, w: W, h: H - topH - bottomH };
-    L.bottom = { x: 0, y: H - bottomH, w: W, h: bottomH };
-    // radar scope, bottom-left
-    var rsz = Math.min(L.bottom.h * 0.46, L.bottom.w * 0.20);
-    L.radar = { cx: L.bottom.x + rsz + 14, cy: L.bottom.y + L.bottom.h * 0.5, r: rsz };
-    // drive cluster bottom-right
-    var bs = clamp(L.bottom.h * 0.30, 42, 66);
-    var rEdge = W - 12, driveW = clamp(W * 0.30, 150, 300);
-    L.btn.thrust = { x: rEdge - driveW, y: L.bottom.y + 12, w: driveW, h: bs };
-    L.btn.left = { x: rEdge - driveW, y: L.bottom.y + 12 + bs + 8, w: driveW * 0.48, h: bs };
-    L.btn.right = { x: rEdge - driveW * 0.48, y: L.bottom.y + 12 + bs + 8, w: driveW * 0.48, h: bs };
-    // ping / light, center
-    var cx0 = L.radar.cx + L.radar.r + 16, cw = clamp(W * 0.18, 96, 168);
-    if (cx0 + cw > L.btn.thrust.x - 8) cw = Math.max(80, L.btn.thrust.x - 8 - cx0);
-    L.btn.ping = { x: cx0, y: L.bottom.y + 12, w: cw, h: bs };
-    L.btn.light = { x: cx0, y: L.bottom.y + 12 + bs + 8, w: cw, h: bs };
-    L.btn.brief = { x: cx0, y: L.bottom.y + 12 + (bs + 8) * 2, w: cw, h: clamp(bs * 0.6, 26, 38) };
+    L.col = { x: 0, y: topH, w: colW, h: H - topH - botH };
+    var mainX = colW, mainW = W - colW, mainY = topH, mainH = H - topH - botH;
+    var phH = mainH * (portrait ? 0.34 : 0.40);
+    L.porthole = { x: mainX + 8, y: mainY + 8, w: mainW - 16, h: phH - 10 };
+    L.monitor = { x: mainX + 8, y: mainY + phH + 2, w: mainW - 16, h: mainH - phH - 10 };
+    L.bottom = { x: 0, y: H - botH, w: W, h: botH };
+    L.tank = { x: L.col.x + L.col.w * 0.30, y: L.col.y + 14, w: L.col.w * 0.40, h: L.col.h * 0.60 };
+    L.depth = { cx: L.col.x + L.col.w * 0.5, cy: L.col.y + L.col.h * 0.82, r: Math.min(L.col.w * 0.32, 38) };
+    var bs = clamp(L.bottom.h * 0.40, 38, 62);
+    L.dpad = { cx: W - bs * 1.9, cy: L.bottom.y + L.bottom.h * 0.52, s: bs };
+    var bw = clamp(W * 0.15, 84, 150);
+    L.btn.ping = { x: 16, y: L.bottom.y + 14, w: bw, h: bs };
+    L.btn.light = { x: 16, y: L.bottom.y + 14 + bs + 8, w: bw, h: bs * 0.84 };
+    L.btn.brief = { x: 16 + bw + 10, y: L.bottom.y + 14, w: clamp(W * 0.11, 64, 110), h: bs * 0.7 };
   }
   function inside(r, p) { return r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; }
+  function dpadRects() { var s = L.dpad.s, cx = L.dpad.cx, cy = L.dpad.cy; return {
+    up: { x: cx - s / 2, y: cy - s * 1.5, w: s, h: s }, down: { x: cx - s / 2, y: cy + s / 2, w: s, h: s },
+    left: { x: cx - s * 1.5, y: cy - s / 2, w: s, h: s }, right: { x: cx + s / 2, y: cy - s / 2, w: s, h: s } }; }
 
   // ---------------- state ----------------
   var G = null;
   function newRun(seed) {
     var rng = new RNG(seed);
-    G = {
-      scene: "titlemenu", seedStr: rng.seedStr, rng: rng, idc: 1, time: 0,
-      x: 0, z: 0, heading: 0, vel: 0, depth: 0,
-      hull: CFG.startHull, oxygen: CFG.startOxygen, threat: 0, haul: 0,
-      lightOn: false, contacts: [], snow: [],
-      sourceSpawned: false, log: [], loreSeen: [], lastLoreDepth: 0,
-      sweep: 0, pingFlash: 0, flash: 0, flashCol: "180,40,40", shake: 0,
-      heartbeat: 0, hbT: 0, woke: false, endKind: null, won: false,
-      menuSel: 0, padActive: false,
-    };
+    G = { scene: "titlemenu", seedStr: rng.seedStr, rng: rng, time: 0,
+      layer: 1, gw: 7, gh: 7, cells: [], sub: { cx: 0, cy: 0 }, facing: { dx: 0, dy: 1 },
+      hull: CFG.startHull, oxygen: CFG.startOxygen, pings: CFG.pingsStart, threat: 0, haul: 0, depth: 0,
+      lightOn: false, transit: null, stalker: null, woke: false, confirmDir: null,
+      leak: 0, scare: null, snow: [], flash: 0, flashCol: "180,40,40", shake: 0, hbT: 0, heartbeat: 0,
+      lamp: { o2: 0, hull: 0, wake: 0 }, endKind: null, won: false, menuSel: 0, padActive: false,
+      hatch: { x: 0, y: 0 }, start: { x: 0, y: 0 }, loreSeen: [], pingFlash: 0, sweep: 0 };
   }
-  function pushLog(m) { if (!m) return; G.log.push(m); if (G.log.length > 18) G.log.shift(); }
   function fmt(t, o) { return String(t).replace(/\{(\w+)\}/g, function (m, key) { return o && o[key] != null ? o[key] : ""; }); }
-  function revealLore() { for (var i = 0; i < LORE.length; i++) if (G.loreSeen.indexOf(i) < 0) { G.loreSeen.push(i); return LORE[i]; } return ""; }
+  function cell(x, y) { return (x < 0 || y < 0 || x >= G.gw || y >= G.gh) ? null : G.cells[y * G.gw + x]; }
 
-  function startDive() {
-    G.x = 0; G.z = 0; G.heading = 0; G.vel = 0; G.depth = 0;
-    G.hull = CFG.startHull; G.oxygen = CFG.startOxygen; G.threat = 0; G.haul = 0;
-    G.lightOn = false; G.contacts = []; G.sourceSpawned = false; G.woke = false;
-    G.log = []; G.endKind = null; G.won = false; G.lastLoreDepth = 0;
-    G.snow = []; for (var i = 0; i < 150; i++) G.snow.push(newSnow(true));
-    for (var c = 0; c < CFG.targetContacts; c++) spawnContact();
-    G.scene = "dive"; pushLog(S.log_dive); pushLog(revealLore());
-    Audio.setMusic("ambient");
-  }
-  function newSnow(initial) {
-    var rz = initial ? G.rng.range(1, 42) : G.rng.range(30, 46);
-    return { rx: G.rng.range(-22, 22), ry: G.rng.range(-16, 16), rz: rz };
-  }
-
-  // ---------------- spawn ----------------
-  function spawnTable() { var t = SPAWN[0]; for (var i = 0; i < SPAWN.length; i++) if (G.depth >= SPAWN[i].depth) t = SPAWN[i]; return t; }
-  function spawnContact(forceLoot) {
-    var tbl = spawnTable();
-    var bearing = G.heading + G.rng.range(-1.15, 1.15);
-    var dist = G.rng.range(CFG.maxRadar * 0.72, CFG.maxRadar * 1.04);
-    var c = { id: G.idc++, x: G.x + Math.sin(bearing) * dist, z: G.z + Math.cos(bearing) * dist, vy: G.rng.range(-4, 4), known: false, alive: true };
-    if (!forceLoot && G.rng.chance(tbl.monsterChance)) {
-      c.type = "monster"; c.monId = G.rng.pick(tbl.monsters); c.hunting = false; c.struck = 0;
-    } else {
-      c.type = "loot"; var lk = G.rng.pick(tbl.loot);
-      if (LOOT[lk].deep && G.depth < LOOT[lk].deep) lk = "data";
-      c.lootId = lk; c.kind = LOOT[lk].kind;
-      c.value = LOOT[lk].value ? G.rng.int(LOOT[lk].value[0], LOOT[lk].value[1]) : 0;
-      c.o2 = LOOT[lk].o2 || 0;
+  // ---------------- layer generation (first 3x3 safe + carved monster-free path to hatch) ----------------
+  function genLayer(layer) {
+    var Lc = LAYERS[layer], rng = G.rng; G.layer = layer; G.gw = Lc.gw; G.gh = Lc.gh;
+    G.cells = []; for (var i = 0; i < G.gw * G.gh; i++) G.cells.push({ x: i % G.gw, y: Math.floor(i / G.gw), mon: false, monId: null, lootId: null, kind: null, loot: null, value: 0, o2: 0, hatch: false, source: false, n: 0, seen: false, flagged: false, triggered: false, collected: false });
+    var sx = Math.floor(G.gw / 2), sy = 0;
+    var hx = clamp(rng.int(1, G.gw - 2), 0, G.gw - 1), hy = G.gh - 1;
+    G.sub = { cx: sx, cy: sy }; G.start = { x: sx, y: sy }; G.hatch = { x: hx, y: hy }; G.facing = { dx: 0, dy: 1 };
+    var safe = {};
+    function mark(x, y) { var c = cell(x, y); if (c) safe[y * G.gw + x] = true; }
+    for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) mark(sx + dx, sy + dy);
+    // carve a monster-free corridor start -> hatch
+    var px = sx, py = sy, guard = 0;
+    while ((px !== hx || py !== hy) && guard++ < 600) {
+      var opts = []; if (px < hx) opts.push([1, 0]); if (px > hx) opts.push([-1, 0]); if (py < hy) opts.push([0, 1]); if (py > hy) opts.push([0, -1]);
+      if (rng.chance(0.3)) opts.push(rng.pick([[1, 0], [-1, 0], [0, 1], [0, -1]]));
+      var st = rng.pick(opts); px = clamp(px + st[0], 0, G.gw - 1); py = clamp(py + st[1], 0, G.gh - 1); mark(px, py);
     }
-    G.contacts.push(c);
+    mark(hx, hy);
+    // monsters on non-safe cells
+    var free = []; for (var c = 0; c < G.cells.length; c++) if (!safe[c]) free.push(G.cells[c]);
+    rng.shuffle(free);
+    var mc = Math.min(Lc.monsters, free.length);
+    for (var m = 0; m < mc; m++) { var mm = free[m]; mm.mon = true; mm.monId = rng.pick(Lc.pool); }
+    // hatch / source
+    var hatchC = cell(hx, hy); hatchC.hatch = true; if (Lc.source) { hatchC.source = true; hatchC.kind = "source"; }
+    // loot + vents on remaining non-monster, non-hatch, non-start cells
+    var open = []; for (var d = 0; d < G.cells.length; d++) { var cc = G.cells[d]; if (!cc.mon && !cc.hatch && !(cc.x === sx && cc.y === sy)) open.push(cc); }
+    rng.shuffle(open); var oi = 0;
+    for (var v = 0; v < (Lc.vents || 0) && oi < open.length; v++, oi++) { open[oi].lootId = "vent"; open[oi].kind = "vent"; open[oi].o2 = LOOT.vent.o2; }
+    for (var lt = 0; lt < (Lc.loot || 0) && oi < open.length; lt++, oi++) { var lk = rng.pick(Lc.lootPool); open[oi].lootId = lk; open[oi].kind = LOOT[lk].kind; open[oi].value = LOOT[lk].value ? rng.int(LOOT[lk].value[0], LOOT[lk].value[1]) : 0; }
+    // numbers
+    for (var y2 = 0; y2 < G.gh; y2++) for (var x2 = 0; x2 < G.gw; x2++) { var t = cell(x2, y2); if (t.mon) continue; var cnt = 0; for (var ny = -1; ny <= 1; ny++) for (var nx = -1; nx <= 1; nx++) { if (!nx && !ny) continue; var nb = cell(x2 + nx, y2 + ny); if (nb && nb.mon) cnt++; } t.n = cnt; }
+    // reveal start (it is a 0 — flood its pocket)
+    var startC = cell(sx, sy); seeCell(startC);
+    G.pings = CFG.pingsStart; G.stalker = null; G.woke = false; G.confirmDir = null; G.transit = null;
+    G.depth = Lc.depth;
+    G.snow = []; for (var sN = 0; sN < 120; sN++) G.snow.push(newSnow(true));
   }
-  function spawnSource() {
-    var dist = CFG.maxRadar * 0.9;
-    G.contacts.push({ id: G.idc++, type: "loot", kind: "source", lootId: "source", x: G.x + Math.sin(G.heading) * dist, z: G.z + Math.cos(G.heading) * dist, vy: 0, known: true, alive: true, value: 0, source: true });
-    G.sourceSpawned = true; pushLog(S.log_source_near); Audio.setMusic("threat");
+  function newSnow(initial) { return { rx: G.rng.range(-20, 20), ry: G.rng.range(-14, 14), rz: initial ? G.rng.range(1, 40) : G.rng.range(28, 44) }; }
+
+  function seeCell(c) { // mark a cell's number visible; flood across 0-regions (classic cascade, visual only)
+    if (!c || c.seen || c.mon) return; c.seen = true;
+    if (c.n === 0) { for (var ny = -1; ny <= 1; ny++) for (var nx = -1; nx <= 1; nx++) { if (!nx && !ny) continue; var nb = cell(c.x + nx, c.y + ny); if (nb && !nb.mon && !nb.seen) seeCell(nb); } }
   }
 
-  // ---------------- relative geometry ----------------
-  function rel(c) {
-    var dx = c.x - G.x, dz = c.z - G.z;
-    var sh = Math.sin(G.heading), ch = Math.cos(G.heading);
-    return { rx: dx * ch - dz * sh, rz: dx * sh + dz * ch, range: Math.sqrt(dx * dx + dz * dz) };
-  }
+  function startRun() { G.layer = 1; G.hull = CFG.startHull; G.oxygen = CFG.startOxygen; G.haul = 0; G.threat = 0; G.lightOn = false; G.leak = 0; G.scare = null; G.loreSeen = []; G.won = false; G.endKind = null; genLayer(1); G.scene = "dive"; Audio.setMusic("ambient"); }
+  function descend() { Audio.descend(); if (OPT.shake) G.shake = 6; var nl = G.layer + 1; if (nl > CFG.layers) { winRun(); return; } genLayer(nl); G.threat = clamp(G.threat - 20, 0, 100); }
+  function winRun() { G.scene = "end"; G.won = true; G.endKind = "win"; Audio.setMusic("none"); Audio.win(); }
+  function die(kind) { if (G.scene !== "dive") return; G.scene = "end"; G.won = false; G.endKind = kind; Audio.setMusic("none"); Audio.lose(); }
 
   // ---------------- actions ----------------
+  function tryDrive(dx, dy) {
+    if (G.scene !== "dive" || G.transit || G.scare) return; Audio.init();
+    var tx = G.sub.cx + dx, ty = G.sub.cy + dy, c = cell(tx, ty); if (!c) return;
+    G.facing = { dx: dx, dy: dy };
+    if (c.flagged && !c.triggered) {
+      if (G.confirmDir && G.confirmDir.dx === dx && G.confirmDir.dy === dy) { G.confirmDir = null; }
+      else { G.confirmDir = { dx: dx, dy: dy }; G.lamp.hull = 0.6; Audio.alert(); return; }
+    } else G.confirmDir = null;
+    G.transit = { dx: dx, dy: dy, target: c, t: 0, isMonster: !!c.mon, shape: c.mon ? MON[c.monId].shape : null, fromX: G.sub.cx, fromY: G.sub.cy };
+  }
+  function resolveArrive(tr) {
+    var c = tr.target; G.transit = null; G.oxygen -= CFG.moveCost;
+    if (c.mon) { strike(c); afterMove(); return; }
+    G.sub = { cx: c.x, cy: c.y };
+    if (c.hatch) { if (c.source) { winRun(); return; } descend(); return; }
+    if (c.lootId && !c.collected) collect(c);
+    seeCell(c);
+    afterMove();
+  }
+  function afterMove() {
+    G.threat = clamp(G.threat + CFG.threatMove, 0, 100);
+    stalkerStep();
+    if (G.oxygen <= 0) { G.oxygen = 0; return die("oxygen"); }
+    if (G.hull <= 0) return die("hull");
+  }
+  function collect(c) {
+    c.collected = true;
+    if (c.kind === "vent") { G.oxygen = clamp(G.oxygen + c.o2, 0, CFG.startOxygen + 40); G.lamp.o2 = 0; Audio.vent(); G.flash = 0.2; G.flashCol = "40,240,170"; }
+    else if (c.kind === "artifact") { G.haul += c.value; Audio.good(); G.flash = 0.25; G.flashCol = "70,240,200"; }
+    else { G.haul += c.value; Audio.scan(); }
+  }
+  function strike(c) {
+    var def = MON[c.monId], dmg = G.rng.int(def.dmg[0], def.dmg[1]);
+    G.hull = clamp(G.hull - dmg, 0, CFG.maxHull);
+    c.seen = true; c.triggered = true; c.flagged = true; // sub is shoved back; the cell is now KNOWN + flagged
+    G.flash = 0.8; G.flashCol = "190,30,30"; if (OPT.shake) G.shake = def.tier >= 3 ? 16 : 11;
+    G.lamp.hull = 1; Audio.roar(); Audio.damage();
+    G.scare = { shape: def.shape, name: def.name, until: G.time + (def.tier >= 3 ? 1.6 : 1.1), t0: G.time, tier: def.tier };
+    Audio.setMusic("threat");
+  }
   function ping() {
-    if (G.scene !== "dive") return; Audio.init();
-    G.threat = clamp(G.threat + CFG.pingThreat, 0, 100); G.pingFlash = 1; G.sweep = 0;
-    var n = 0; for (var i = 0; i < G.contacts.length; i++) { var c = G.contacts[i]; if (rel(c).range <= CFG.maxRadar) { c.known = true; n++; } }
-    Audio.ping(); pushLog(S.log_ping); pushLog(fmt(S.log_classify, { n: n }));
-    if (G.threat >= CFG.panicThreat) { wakeAll(); pushLog(S.log_panic); }
+    if (G.scene !== "dive" || G.transit || G.scare || G.pings <= 0) { if (G.pings <= 0) G.lamp.o2 = 0.4; return; }
+    Audio.init(); G.pings--; G.pingFlash = 1; G.sweep = 0; G.threat = clamp(G.threat + CFG.threatPing, 0, 100);
+    var fx = G.facing.dx, fy = G.facing.dy;
+    for (var d = 1; d <= CFG.pingCone; d++) { for (var l = -(d - 1); l <= d - 1; l++) {
+      var cx = G.sub.cx + fx * d - fy * l, cy = G.sub.cy + fy * d + fx * l; var c = cell(cx, cy);
+      if (c && !c.mon && !c.seen) seeCell(c); // ping reveals numbers of SAFE cells only; monsters stay fog (deduce them)
+    } }
+    Audio.ping();
+    if (G.threat >= CFG.wake) stalkerWake();
+    if (G.threat >= CFG.panic) stalkerWake();
   }
-  function toggleLight() { if (G.scene !== "dive") return; Audio.init(); G.lightOn = !G.lightOn; pushLog(G.lightOn ? S.log_light_on : S.log_light_off); Audio.vent(); }
-  function wakeNearest() {
-    var best = null, bd = 1e9; for (var i = 0; i < G.contacts.length; i++) { var c = G.contacts[i]; if (c.type === "monster" && !c.hunting) { var d = rel(c).range; if (d < bd) { bd = d; best = c; } } }
-    if (best) { best.hunting = true; if (!G.woke) { G.woke = true; pushLog(S.log_wake); Audio.alert(); } }
+  function toggleLight() { if (G.scene !== "dive") return; Audio.init(); G.lightOn = !G.lightOn; Audio.vent(); }
+  function flagFaced() { if (G.scene !== "dive" || G.transit) return; var c = cell(G.sub.cx + G.facing.dx, G.sub.cy + G.facing.dy); flagCell(c); }
+  function flagCell(c) { if (!c || c.seen) return; c.flagged = !c.flagged; G.confirmDir = null; Audio.card(); }
+
+  // ---------------- stalker (the hunt) ----------------
+  function stalkerWake() {
+    if (G.stalker && G.stalker.active) return;
+    var best = null, bd = 1e9; for (var i = 0; i < G.cells.length; i++) { var c = G.cells[i]; if (c.mon && !c.triggered) { var dd = Math.abs(c.x - G.sub.cx) + Math.abs(c.y - G.sub.cy); if (dd < bd && dd > 1) { bd = dd; best = c; } } }
+    if (!best) return;
+    G.stalker = { x: best.x, y: best.y, monId: best.monId, shape: MON[best.monId].shape, active: true, cool: 0 };
+    G.woke = true; G.lamp.wake = 1; Audio.alert(); Audio.setMusic("threat");
   }
-  function wakeAll() { for (var i = 0; i < G.contacts.length; i++) if (G.contacts[i].type === "monster") G.contacts[i].hunting = true; if (!G.woke) { G.woke = true; Audio.alert(); } }
+  function stalkerStep() {
+    if (G.threat < CFG.wake * 0.6 && G.stalker) { G.stalker = null; return; } // it loses the scent in the silence
+    if (!G.stalker || !G.stalker.active) return;
+    var s = G.stalker; for (var step = 0; step < CFG.stalkerStep; step++) {
+      var dx = G.sub.cx - s.x, dy = G.sub.cy - s.y;
+      if (dx === 0 && dy === 0) break;
+      if (Math.abs(dx) >= Math.abs(dy)) s.x += dx > 0 ? 1 : -1; else s.y += dy > 0 ? 1 : -1;
+      if (s.x === G.sub.cx && s.y === G.sub.cy) { stalkerStrike(); break; }
+    }
+  }
+  function stalkerStrike() {
+    var def = MON[G.stalker.monId], dmg = G.rng.int(def.dmg[0], def.dmg[1]);
+    G.hull = clamp(G.hull - dmg, 0, CFG.maxHull); G.flash = 0.85; G.flashCol = "190,30,30"; if (OPT.shake) G.shake = 16;
+    G.lamp.hull = 1; Audio.roar(); Audio.damage();
+    G.scare = { shape: def.shape, name: def.name, until: G.time + 1.5, t0: G.time, tier: def.tier };
+    G.stalker = null; G.threat = clamp(G.threat - 30, 0, 100);
+    if (G.hull <= 0) die("hull");
+  }
 
   // ---------------- update ----------------
   function update(dt) {
     G.time += dt / 1000; var s = dt / 1000;
-    if (G.pingFlash > 0) G.pingFlash = Math.max(0, G.pingFlash - s * 1.4);
     if (G.flash > 0) G.flash = Math.max(0, G.flash - dt / 600);
     if (G.shake > 0) G.shake = Math.max(0, G.shake - dt / 60);
+    if (G.pingFlash > 0) G.pingFlash = Math.max(0, G.pingFlash - s * 1.3);
     G.sweep = (G.sweep + s * 2.2) % (Math.PI * 2);
+    for (var key in G.lamp) if (G.lamp[key] > 0) G.lamp[key] = Math.max(0, G.lamp[key] - s * 0.4);
+    if (G.scare && G.time > G.scare.until) G.scare = null;
+    // snow drift (gentle when idle, rush during transit)
+    var rush = G.transit ? 14 : 1.5;
+    for (var i = 0; i < G.snow.length; i++) { var p = G.snow[i]; p.rz -= rush * s; if (p.rz < 0.5) { var ns = newSnow(false); p.rx = ns.rx; p.ry = ns.ry; p.rz = ns.rz; } }
     if (G.scene !== "dive") return;
 
-    // --- controls -> motion ---
-    var h = controls();
-    var dHead = 0;
-    if (h.left) dHead -= CFG.turnSpeed * s; if (h.right) dHead += CFG.turnSpeed * s;
-    G.heading += dHead;
-    var targetVel = h.thrust ? CFG.speed : (h.reverse ? -CFG.speed * CFG.reverseFrac : 0);
-    G.vel += (targetVel - G.vel) * Math.min(1, s * 3.5);
-    if (Math.abs(G.vel) < 0.02) G.vel = 0;
-    var fwd = G.vel * s;
-    G.x += Math.sin(G.heading) * fwd; G.z += Math.cos(G.heading) * fwd;
-    if (fwd > 0) G.depth += fwd * CFG.depthPerUnit;
+    if (G.transit) { G.transit.t += s / CFG.moveGlide; if (G.transit.t >= 1) resolveArrive(G.transit); }
 
-    // --- snow (relative frustum) ---
-    var cdh = Math.cos(-dHead), sdh = Math.sin(-dHead);
-    for (var i = 0; i < G.snow.length; i++) {
-      var p = G.snow[i];
-      var nrx = p.rx * cdh - p.rz * sdh, nrz = p.rx * sdh + p.rz * cdh; p.rx = nrx; p.rz = nrz;
-      p.rz -= fwd;
-      if (p.rz < 0.5 || p.rz > 52 || Math.abs(p.rx) > 40) { var ns = newSnow(false); p.rx = ns.rx; p.ry = ns.ry; p.rz = ns.rz; }
-    }
-
-    // --- air clock ---
-    G.oxygen -= CFG.oxygenDrain * s;
-    if (G.oxygen <= 0) { G.oxygen = 0; pushLog(S.log_no_air); return end("oxygen"); }
-
-    // --- threat ---
-    var add = 0; if (G.lightOn) add += CFG.lightThreat * s; if (h.thrust || h.reverse) add += CFG.moveThreat * s;
+    // air clock
+    G.oxygen -= CFG.idleDrain * s; if (G.oxygen <= 0) { G.oxygen = 0; return die("oxygen"); }
+    if (G.oxygen < CFG.startOxygen * 0.2) G.lamp.o2 = Math.max(G.lamp.o2, 0.5 + 0.5 * Math.sin(G.time * 5));
+    // threat
+    var add = 0; if (G.lightOn) add += CFG.threatLight * s;
     G.threat = clamp(G.threat + add - CFG.threatDecay * s, 0, 100);
-    if (G.threat >= CFG.wakeThreat) wakeNearest();
-    if (G.threat >= CFG.panicThreat) wakeAll();
-
-    // --- contacts: monster AI, proximity, collect ---
-    var nearestMon = 1e9;
-    for (var c = 0; c < G.contacts.length; c++) {
-      var k = G.contacts[c]; if (!k.alive) continue; var r = rel(k);
-      if (k.type === "monster") {
-        if (k.hunting) { var ux = (G.x - k.x) / (r.range || 1), uz = (G.z - k.z) / (r.range || 1); var ms = CFG.speed * CFG.monsterHuntSpeed * s; k.x += ux * ms; k.z += uz * ms; }
-        if (r.range < nearestMon) nearestMon = r.range;
-        if (k.struck > 0) k.struck -= s;
-        if (r.range < CFG.collectRange && k.struck <= 0) { strike(k); k.struck = 1.4; }
-      } else {
-        if (r.range < CFG.collectRange) { collect(k); }
-        else if (k.source && r.range < CFG.collectRange * 1.4) { collect(k); }
-      }
-    }
-    G.heartbeat = nearestMon < 26 ? clamp(1 - nearestMon / 26, 0, 1) : 0;
-    heartbeatAudio(dt);
-
-    // --- despawn behind / far, keep field populated ---
-    for (var d = G.contacts.length - 1; d >= 0; d--) { var cc = G.contacts[d]; var rr = rel(cc);
-      if (!cc.alive || (!cc.source && (rr.rz < -CFG.maxRadar * 0.5 || rr.range > CFG.maxRadar * 1.5))) G.contacts.splice(d, 1); }
-    var live = 0; for (var e = 0; e < G.contacts.length; e++) if (G.contacts[e].type !== "monster" || !G.contacts[e].hunting) live++;
-    while (G.contacts.length < CFG.targetContacts) spawnContact();
-
-    // --- source / depth lore ---
-    if (!G.sourceSpawned && G.depth >= CFG.sourceDepth) spawnSource();
-    if (G.depth - G.lastLoreDepth > 420) { G.lastLoreDepth = G.depth; pushLog(revealLore()); }
-
-    // --- music ---
-    var wantThreat = G.threat >= CFG.wakeThreat || G.heartbeat > 0.3 || G.sourceSpawned;
+    if (G.threat >= CFG.wake) G.lamp.wake = Math.max(G.lamp.wake, 0.5);
+    // smooth leak severity toward hull damage
+    var target = 1 - G.hull / CFG.maxHull; G.leak += (target - G.leak) * Math.min(1, s * 2);
+    // heartbeat from stalker proximity / low hull / low air
+    var hbScare = 0; if (G.stalker && G.stalker.active) { var sd = Math.abs(G.stalker.x - G.sub.cx) + Math.abs(G.stalker.y - G.sub.cy); hbScare = clamp(1 - sd / 6, 0, 1); }
+    G.heartbeat = Math.max(hbScare, G.leak > 0.7 ? G.leak : 0, G.oxygen < CFG.startOxygen * 0.12 ? 0.6 : 0);
+    if (G.heartbeat > 0.06) { var iv = 1.1 - G.heartbeat * 0.7; G.hbT -= s; if (G.hbT <= 0) { G.hbT = iv; Audio.heartbeat(G.heartbeat); } } else G.hbT = 0;
+    // ambient groan/drip when flooding & quiet
+    if (G.leak > 0.25 && Math.sin(G.time * 0.7) > 0.995) Audio.groan && Audio.groan();
+    var wantThreat = G.threat >= CFG.wake || (G.stalker && G.stalker.active) || G.leak > 0.6;
     if (Audio._which !== (wantThreat ? "threat" : "ambient")) Audio.setMusic(wantThreat ? "threat" : "ambient");
   }
 
-  function heartbeatAudio(dt) {
-    if (G.heartbeat <= 0.05) { G.hbT = 0; return; }
-    var interval = 1.1 - G.heartbeat * 0.7; G.hbT -= dt / 1000;
-    if (G.hbT <= 0) { G.hbT = interval; Audio.heartbeat ? Audio.heartbeat(G.heartbeat) : Audio.alert(); if (OPT.shake) G.shake = Math.max(G.shake, G.heartbeat * 3); }
-  }
-
-  function strike(k) {
-    var def = MON[k.monId];
-    var dmg = G.rng.int(def.dmg[0], def.dmg[1]);
-    G.hull = clamp(G.hull - dmg, 0, CFG.maxHull);
-    G.flash = 0.7; G.flashCol = "180,40,40"; if (OPT.shake) G.shake = def.tier >= 3 ? 14 : 9;
-    Audio.roar(); Audio.damage(); pushLog(fmt(S.log_strike, { name: def.name, dmg: dmg }));
-    G.encounter = { shape: def.shape, name: def.name, until: G.time + 1.8 };
-    // shove the sub back a little
-    G.x -= Math.sin(G.heading) * 3; G.z -= Math.cos(G.heading) * 3;
-    if (G.hull <= 0) end("hull");
-  }
-  function collect(k) {
-    k.alive = false;
-    if (k.source) { winRun(); return; }
-    if (k.kind === "vent") { G.oxygen = clamp(G.oxygen + k.o2, 0, CFG.startOxygen); pushLog(fmt(S.log_collect_vent, { o2: k.o2 })); Audio.vent(); G.flash = 0.25; G.flashCol = "40,240,170"; }
-    else if (k.kind === "artifact") { G.haul += k.value; pushLog(fmt(S.log_collect_art, { name: LOOT[k.lootId].name, v: k.value })); Audio.good(); G.flash = 0.3; G.flashCol = "70,240,200"; }
-    else { G.haul += k.value; pushLog(fmt(S.log_collect_data, { v: k.value })); Audio.scan(); }
-  }
-  function end(kind) { if (G.scene === "end") return true; G.scene = "end"; G.endKind = kind; G.won = false; Audio.setMusic("none"); Audio.lose(); return true; }
-  function winRun() { G.scene = "end"; G.endKind = "win"; G.won = true; Audio.setMusic("none"); Audio.win(); }
-
   // ---------------- render ----------------
   function render() {
-    ctx.clearRect(0, 0, W, H); ctx.fillStyle = "#020407"; ctx.fillRect(0, 0, W, H);
-    if (!G) return;
+    ctx.clearRect(0, 0, W, H); ctx.fillStyle = "#05080c"; ctx.fillRect(0, 0, W, H); if (!G) return;
     if (UI.overlay === "help") return renderHelp();
     if (UI.overlay === "options") return renderOptions();
     if (G.scene === "dive") return renderDive();
@@ -251,201 +255,235 @@
   }
 
   function renderForwardBuffer() {
-    var bw = buf.width, bh = buf.height;
-    bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.clearRect(0, 0, bw, bh);
-    var fc = []; for (var i = 0; i < G.contacts.length; i++) { var c = G.contacts[i]; if (!c.alive) continue; var r = rel(c); if (r.rz <= 0.6) continue;
-      fc.push({ rx: r.rx, ry: c.vy, rz: r.rz, isMonster: c.type === "monster", monShape: c.monId ? MON[c.monId].shape : null, kind: c.kind }); }
-    Art.drawForward(bctx, bw, bh, { contacts: fc, snow: G.snow, lightOn: G.lightOn, threat: G.threat / 100, time: G.time, fov: CFG.fov, headlightRange: CFG.headlightRange });
-    var inset = Math.max(6, Math.round(8 / SCALE) + 4);
-    Art.drawCockpit(bctx, bw, bh, { x: inset, y: inset, w: bw - inset * 2, h: bh - inset * 2 });
+    var bw = buf.width, bh = buf.height; bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.clearRect(0, 0, bw, bh);
+    Art.drawForward(bctx, bw, bh, { contacts: forwardContacts(), snow: G.snow, lightOn: G.lightOn, threat: G.threat / 100, time: G.time, fov: 1.2, headlightRange: 30 });
+  }
+  function forwardContacts() {
+    var out = [], sp = 7, tp = G.transit ? G.transit.t : 0;
+    for (var d = 1; d <= 3; d++) { var tx = G.sub.cx + G.facing.dx * d, ty = G.sub.cy + G.facing.dy * d; var c = cell(tx, ty); if (!c) continue;
+      var rz = Math.max(0.8, d * sp - tp * sp * 0.9);
+      if (c.hatch) out.push({ rx: 0, ry: 0, rz: rz, kind: c.source ? "source" : "vent", isMonster: false });
+      else if (c.seen && c.lootId && !c.collected) out.push({ rx: 0, ry: 0, rz: rz, kind: c.kind, isMonster: false }); }
+    if (G.transit && G.transit.isMonster) out.push({ rx: 0, ry: 0, rz: Math.max(0.8, 7 - G.transit.t * 6.2), isMonster: true, monShape: G.transit.shape });
+    if (G.stalker && G.stalker.active) { var sdx = G.stalker.x - G.sub.cx, sdy = G.stalker.y - G.sub.cy; var fwd = sdx * G.facing.dx + sdy * G.facing.dy, lat = sdx * G.facing.dy - sdy * G.facing.dx; if (fwd > 0) out.push({ rx: lat * 4, ry: 0, rz: Math.max(1.2, fwd * 7), isMonster: true, monShape: G.stalker.shape }); }
+    return out;
   }
 
   function renderDive() {
+    drawCockpitBG();
+    // forward porthole
     renderForwardBuffer();
     var shx = G.shake ? (Math.random() - 0.5) * G.shake : 0, shy = G.shake ? (Math.random() - 0.5) * G.shake : 0;
-    ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, L.scene.x + shx, L.scene.y + shy, L.scene.w, L.scene.h);
-    drawTopBar();
-    drawRadar();
-    drawControls();
-    if (G.encounter && G.time < G.encounter.until) drawEncounter();
-    // horror tint when something is close
-    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, sanity: 1 - G.heartbeat * 0.7, flash: G.flash, flashCol: G.flashCol });
-    if (G.heartbeat > 0.25) { ctx.fillStyle = "rgba(150,20,30," + (G.heartbeat * 0.18).toFixed(3) + ")"; ctx.fillRect(0, 0, W, H); }
+    var ph = L.porthole; ctx.save(); ctx.beginPath(); Art.rrect(ctx, ph.x, ph.y, ph.w, ph.h, 10); ctx.clip();
+    ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, ph.x + shx, ph.y + shy, ph.w, ph.h); ctx.restore();
+    portholeBezel(ph);
+    // monitor grid
+    drawMonitor();
+    // instruments
+    Art.drawOxygenTank(ctx, L.tank.x, L.tank.y, L.tank.w, L.tank.h, G.oxygen / CFG.startOxygen, G.time);
+    Art.drawDepthGauge(ctx, L.depth.cx, L.depth.cy, L.depth.r, clamp(G.layer / CFG.layers, 0, 1), G.time);
+    drawLamps(); drawControls();
+    // jumpscare on top
+    if (G.scare) drawScare();
+    // diegetic hull = flooding cabin (drawn over everything except scanlines)
+    Art.drawLeak(ctx, W, H, clamp(G.leak, 0, 1), G.time);
+    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, flash: G.flash, flashCol: G.flashCol });
+    if (G.heartbeat > 0.25) { ctx.fillStyle = "rgba(150,20,30," + (G.heartbeat * 0.16).toFixed(3) + ")"; ctx.fillRect(0, 0, W, H); }
   }
 
-  function drawTopBar() {
-    ctx.fillStyle = PAL.panel; ctx.fillRect(0, 0, W, L.top.h);
-    ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.fillRect(0, L.top.h - 3, W, 3);
-    var pad = 10, gw = clamp((W - 250) / 3, 78, 210), gh = clamp(L.top.h - 14, 26, 46), y = 7;
-    Art.gauge(ctx, { x: pad, y: y, w: gw, h: gh }, S.hud_hull, G.hull, CFG.maxHull, "hull");
-    Art.gauge(ctx, { x: pad + gw + 8, y: y, w: gw, h: gh }, S.hud_oxygen, G.oxygen, CFG.startOxygen, "oxygen");
-    Art.gauge(ctx, { x: pad + (gw + 8) * 2, y: y, w: gw, h: gh }, S.hud_threat, G.threat, 100, G.threat >= CFG.wakeThreat ? "hull" : "sanity");
-    Art.text(ctx, S.hud_depth + " " + Math.floor(G.depth) + S.hud_meters, W - 12, y + gh * 0.42, Math.round(gh * 0.42), PAL.amberHi, "right");
-    Art.text(ctx, S.hud_haul + " ₽" + G.haul, W - 12, y + gh * 0.92, Math.round(gh * 0.34), PAL.bioHi, "right");
+  function drawCockpitBG() {
+    var g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#161b22"); g.addColorStop(0.5, PAL.panel); g.addColorStop(1, "#0c0f14");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // riveted seams + pipes
+    ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.lineWidth = 2; ctx.strokeRect(L.col.w, L.top.h, W - L.col.w, H - L.top.h - L.bottom.h);
+    ctx.fillStyle = PAL.rivet; for (var x = 12; x < W; x += 28) { ctx.beginPath(); ctx.arc(x, L.top.h - 4, 2, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(x, H - L.bottom.h + 4, 2, 0, 7); ctx.fill(); }
+    ctx.strokeStyle = PAL.steel; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(L.col.w * 0.5, L.top.h); ctx.lineTo(L.col.w * 0.5, L.col.y + L.col.h); ctx.stroke();
+    ctx.strokeStyle = PAL.steelHi; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(L.col.w * 0.5 - 2, L.top.h); ctx.lineTo(L.col.w * 0.5 - 2, L.col.y + L.col.h); ctx.stroke();
+  }
+  function portholeBezel(ph) {
+    ctx.lineWidth = 7; ctx.strokeStyle = PAL.steelLo; Art.rrect(ctx, ph.x - 3, ph.y - 3, ph.w + 6, ph.h + 6, 12); ctx.stroke();
+    ctx.lineWidth = 2; ctx.strokeStyle = PAL.steelHi; Art.rrect(ctx, ph.x - 5, ph.y - 5, ph.w + 10, ph.h + 10, 14); ctx.stroke();
+    ctx.fillStyle = PAL.rivet; var n = 8; for (var i = 0; i <= n; i++) { var t = i / n; ctx.beginPath(); ctx.arc(ph.x + ph.w * t, ph.y - 8, 2, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(ph.x + ph.w * t, ph.y + ph.h + 8, 2, 0, 7); ctx.fill(); }
   }
 
-  function drawRadar() {
-    var rr = L.radar;
-    var contacts = [];
-    for (var i = 0; i < G.contacts.length; i++) { var c = G.contacts[i]; if (!c.alive) continue; var r = rel(c); if (r.range > CFG.maxRadar) continue;
-      var bearing = Math.atan2(r.rx, r.rz);
-      contacts.push({ angle: bearing - Math.PI / 2, dist: clamp(r.range / CFG.maxRadar, 0, 1),
-        known: c.known, category: c.type === "monster" ? "creature" : c.kind === "vent" ? "artifact" : c.kind === "source" ? "anomaly" : "wreck",
-        threat: c.type === "monster" ? (MON[c.monId].tier >= 3 ? 3 : 2) : 0, phantom: false, resolved: !c.known && false, selected: false }); }
-    Art.drawSonar(ctx, rr.cx, rr.cy, rr.r, { time: G.time, sweep: G.sweep, sanity: 1 - G.threat / 160, contacts: contacts });
-    Art.text(ctx, "RADAR", rr.cx, rr.cy + rr.r + 14, 11, PAL.textDim, "center");
+  function drawMonitor() {
+    var m = L.monitor;
+    // CRT housing
+    ctx.fillStyle = PAL.steelLo; Art.rrect(ctx, m.x - 6, m.y - 6, m.w + 12, m.h + 12, 10); ctx.fill();
+    ctx.strokeStyle = PAL.steelHi; ctx.lineWidth = 1.5; Art.rrect(ctx, m.x - 6, m.y - 6, m.w + 12, m.h + 12, 10); ctx.stroke();
+    var fg = ctx.createRadialGradient(m.x + m.w / 2, m.y + m.h / 2, 4, m.x + m.w / 2, m.y + m.h / 2, m.w * 0.7);
+    fg.addColorStop(0, "#06241a"); fg.addColorStop(1, "#02110b"); ctx.fillStyle = fg; Art.rrect(ctx, m.x, m.y, m.w, m.h, 6); ctx.fill();
+    // grid geometry
+    var gap = 2, cellSz = Math.floor(Math.min((m.w - 12 - (G.gw - 1) * gap) / G.gw, (m.h - 12 - (G.gh - 1) * gap) / G.gh));
+    cellSz = clamp(cellSz, 6, 56);
+    var fullW = G.gw * cellSz + (G.gw - 1) * gap, fullH = G.gh * cellSz + (G.gh - 1) * gap;
+    var gx = m.x + (m.w - fullW) / 2, gy = m.y + (m.h - fullH) / 2;
+    // prep cells for drawCell
+    for (var i = 0; i < G.cells.length; i++) { var c = G.cells[i]; c.revealed = c.seen; c.dnum = c.n; c.cor = false; c.loot = (c.seen && c.lootId && !c.collected && c.kind !== "source") ? c.kind : null; }
+    Art.drawGrid(ctx, { cells: G.cells, gw: G.gw, gh: G.gh, cell: cellSz, gap: gap, x: gx, y: gy, time: G.time, cursor: null });
+    // hatch / source marker
+    var hc = cell(G.hatch.x, G.hatch.y); if (hc) { var hxp = gx + hc.x * (cellSz + gap), hyp = gy + hc.y * (cellSz + gap);
+      if (hc.source) { Art.lootGlyph(ctx, hxp + cellSz / 2, hyp + cellSz / 2, cellSz * 0.4, "shard", G.time); }
+      else { ctx.strokeStyle = PAL.bioHi; ctx.lineWidth = 2; var hs = cellSz * 0.3, mcx = hxp + cellSz / 2, mcy = hyp + cellSz / 2;
+        ctx.beginPath(); ctx.moveTo(mcx - hs, mcy - hs * 0.5); ctx.lineTo(mcx, mcy + hs * 0.6); ctx.lineTo(mcx + hs, mcy - hs * 0.5); ctx.stroke();
+        ctx.beginPath(); ctx.arc(mcx, mcy, hs * 0.9, 0, 7); ctx.globalAlpha = 0.4 + 0.3 * Math.sin(G.time * 3); ctx.stroke(); ctx.globalAlpha = 1; } }
+    // stalker marker
+    if (G.stalker && G.stalker.active) { var sxp = gx + G.stalker.x * (cellSz + gap) + cellSz / 2, syp = gy + G.stalker.y * (cellSz + gap) + cellSz / 2;
+      ctx.save(); ctx.globalAlpha = 0.5 + 0.5 * Math.sin(G.time * 8); Art.glowDot(ctx, sxp, syp, cellSz * 0.5, PAL.bloodHi, 1); ctx.fillStyle = PAL.bloodHi; ctx.beginPath(); ctx.arc(sxp, syp, cellSz * 0.18, 0, 7); ctx.fill(); ctx.restore(); }
+    // sub marker (lerp during transit) + facing
+    var scx = G.sub.cx, scy = G.sub.cy; if (G.transit) { scx += G.transit.dx * G.transit.t * (G.transit.isMonster ? 0.5 : 1); scy += G.transit.dy * G.transit.t * (G.transit.isMonster ? 0.5 : 1); }
+    var sxp2 = gx + scx * (cellSz + gap) + cellSz / 2, syp2 = gy + scy * (cellSz + gap) + cellSz / 2;
+    ctx.save(); Art.glowDot(ctx, sxp2, syp2, cellSz * 0.55, PAL.phosHi, 1);
+    ctx.fillStyle = PAL.phosHi; ctx.strokeStyle = "#04120c"; ctx.lineWidth = 1;
+    var a = Math.atan2(G.facing.dy, G.facing.dx); ctx.translate(sxp2, syp2); ctx.rotate(a);
+    var r = cellSz * 0.32; ctx.beginPath(); ctx.moveTo(r, 0); ctx.lineTo(-r * 0.7, -r * 0.7); ctx.lineTo(-r * 0.3, 0); ctx.lineTo(-r * 0.7, r * 0.7); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+    // confirm-override prompt (a pulsing ring on the flagged target) — diegetic, no text
+    if (G.confirmDir) { var fcx = gx + (G.sub.cx + G.confirmDir.dx) * (cellSz + gap) + cellSz / 2, fcy = gy + (G.sub.cy + G.confirmDir.dy) * (cellSz + gap) + cellSz / 2; ctx.strokeStyle = PAL.bloodHi; ctx.lineWidth = 2; ctx.globalAlpha = 0.4 + 0.5 * Math.sin(G.time * 10); ctx.beginPath(); ctx.arc(fcx, fcy, cellSz * 0.6, 0, 7); ctx.stroke(); ctx.globalAlpha = 1; }
+    // scanline glare over the monitor
+    ctx.save(); ctx.beginPath(); Art.rrect(ctx, m.x, m.y, m.w, m.h, 6); ctx.clip();
+    ctx.fillStyle = "rgba(0,0,0,0.16)"; for (var ys = 0; ys < m.h; ys += 3) ctx.fillRect(m.x, m.y + ys, m.w, 1);
+    var gl = ctx.createLinearGradient(m.x, m.y, m.x + m.w, m.y + m.h); gl.addColorStop(0, "rgba(120,255,210,0.05)"); gl.addColorStop(0.5, "rgba(0,0,0,0)"); ctx.fillStyle = gl; ctx.fillRect(m.x, m.y, m.w, m.h); ctx.restore();
+    L._grid = { gx: gx, gy: gy, cell: cellSz, gap: gap };
+  }
+
+  function drawLamps() {
+    var y = L.top.h * 0.5, x = W - 24;
+    Art.drawWarnLamp(ctx, x, y, clamp(L.top.h * 0.22, 5, 9), G.lamp.hull > 0.05, PAL.bloodHi, G.time); x -= 28;
+    Art.drawWarnLamp(ctx, x, y, clamp(L.top.h * 0.22, 5, 9), G.lamp.o2 > 0.05, PAL.amberHi, G.time); x -= 28;
+    Art.drawWarnLamp(ctx, x, y, clamp(L.top.h * 0.22, 5, 9), G.lamp.wake > 0.05, "#ff6452", G.time);
   }
 
   function drawControls() {
-    var h = controls();
-    Art.button(ctx, L.btn.thrust, S.btn_thrust + (G.vel > 0.1 ? " ▲" : ""), { primary: h.thrust, hover: UI.hover === "thrust" });
-    Art.button(ctx, L.btn.left, S.btn_left, { primary: h.left, hover: UI.hover === "left" });
-    Art.button(ctx, L.btn.right, S.btn_right, { primary: h.right, hover: UI.hover === "right" });
-    Art.button(ctx, L.btn.ping, S.btn_ping, { primary: G.pingFlash > 0.4, hover: UI.hover === "ping" });
-    Art.button(ctx, L.btn.light, S.btn_light + (G.lightOn ? " •" : ""), { primary: G.lightOn, hover: UI.hover === "light" });
-    Art.button(ctx, L.btn.brief, S.menu_help, { hover: UI.hover === "brief" });
-    // a log line above the controls
-    var idx = G.log.length - 1; if (idx >= 0) Art.text(ctx, "› " + G.log[idx], L.radar.cx + L.radar.r + 16, L.bottom.y + L.bottom.h - 8, clamp(W * 0.016, 10, 14), PAL.phosHi, "left");
+    // ping charge dots (above ping button)
+    var pb = L.btn.ping; for (var i = 0; i < CFG.pingsStart; i++) { var on = i < G.pings; var dx = pb.x + 10 + i * 16, dy = pb.y - 10; ctx.beginPath(); ctx.arc(dx, dy, 5, 0, 7); ctx.fillStyle = on ? PAL.bioHi : "#13201a"; ctx.fill(); ctx.strokeStyle = PAL.phosLo; ctx.lineWidth = 1; ctx.stroke(); }
+    Art.button(ctx, pb, "PING", { primary: G.pingFlash > 0.4, hover: UI.hover === "ping", disabled: G.pings <= 0 });
+    Art.button(ctx, L.btn.light, "LIGHT" + (G.lightOn ? " •" : ""), { primary: G.lightOn, hover: UI.hover === "light" });
+    Art.button(ctx, L.btn.brief, "?", { hover: UI.hover === "brief" });
+    // d-pad
+    var d = dpadRects();
+    Art.button(ctx, d.up, "▲", { hover: UI.hover === "up" }); Art.button(ctx, d.down, "▼", { hover: UI.hover === "down" });
+    Art.button(ctx, d.left, "◄", { hover: UI.hover === "left" }); Art.button(ctx, d.right, "►", { hover: UI.hover === "right" });
   }
 
-  function drawEncounter() {
-    var alpha = clamp((G.encounter.until - G.time) / 1.8, 0, 1);
-    ctx.save(); ctx.globalAlpha = Math.min(1, alpha * 2);
-    Art.text(ctx, G.encounter.name.toUpperCase(), W / 2, L.scene.y + L.scene.h * 0.5, clamp(W * 0.05, 22, 46), PAL.bloodHi, "center");
+  function drawScare() {
+    var sc = G.scare, k = clamp((G.time - sc.t0) / 0.18, 0, 1); // fast pop-in
+    var ph = L.porthole;
+    // white-on-black pop frame
+    if (k < 0.4) { ctx.fillStyle = "rgba(220,235,235," + (0.5 * (1 - k / 0.4)).toFixed(2) + ")"; ctx.fillRect(ph.x, ph.y, ph.w, ph.h); }
+    ctx.save(); ctx.beginPath(); Art.rrect(ctx, ph.x, ph.y, ph.w, ph.h, 10); ctx.clip();
+    ctx.fillStyle = "#03070a"; ctx.fillRect(ph.x, ph.y, ph.w, ph.h);
+    var sz = Math.min(ph.w, ph.h) * (0.42 + 0.18 * k);
+    Art.drawPortrait(ctx, ph.x + ph.w / 2, ph.y + ph.h / 2, sz, { category: "creature", name: sc.name, id: 9 }, G.time);
     ctx.restore();
   }
 
-  function renderSceneBackground() {
-    var bw = buf.width, bh = buf.height; bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.clearRect(0, 0, bw, bh);
-    Art.drawTitle(bctx, bw, bh, G ? G.time : 0);
-    ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, 0, 0, W, H);
-  }
+  // ---------------- title / help / options / end ----------------
+  function renderSceneBackground() { var bw = buf.width, bh = buf.height; bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.clearRect(0, 0, bw, bh); Art.drawTitle(bctx, bw, bh, G ? G.time : 0); ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, 0, 0, W, H); }
   function renderTitle() {
-    renderSceneBackground();
-    var cy = H * 0.28; Art.text(ctx, S.title, W / 2, cy, clamp(W * 0.11, 38, 96), PAL.phosHi, "center");
+    renderSceneBackground(); var cy = H * 0.27; Art.text(ctx, S.title, W / 2, cy, clamp(W * 0.11, 38, 96), PAL.phosHi, "center");
     Art.text(ctx, S.subtitle.toUpperCase(), W / 2, cy + clamp(W * 0.04, 18, 34), clamp(W * 0.022, 12, 22), PAL.bio, "center");
-    Art.text(ctx, S.tagline, W / 2, cy + clamp(W * 0.066, 30, 56), clamp(W * 0.016, 10, 16), PAL.textDim, "center");
-    UI.menu = []; var bw = clamp(W * 0.4, 220, 340), bh = clamp(H * 0.075, 44, 62), bx = (W - bw) / 2, by = H * 0.5, gap = 14;
+    Art.wrapText(ctx, S.tagline, W / 2, cy + clamp(W * 0.07, 32, 56), clamp(W * 0.5, 280, 640), clamp(W * 0.016, 10, 16), PAL.textDim);
+    UI.menu = []; var bw = clamp(W * 0.4, 220, 340), bh = clamp(H * 0.075, 44, 62), bx = (W - bw) / 2, by = H * 0.52, gap = 14;
     var labels = [[S.menu_dive, "dive", true], [S.menu_help, "help", false], [S.menu_options, "options", false]];
     for (var i = 0; i < labels.length; i++) { var r = { x: bx, y: by + i * (bh + gap), w: bw, h: bh }; Art.button(ctx, r, labels[i][0], { primary: labels[i][2], hover: UI.hover === "m" + i || (G.padActive && G.menuSel === i) }); UI.menu.push({ r: r, act: labels[i][1] }); }
     Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
   }
   function renderHelp() {
-    renderSceneBackground();
-    var x = clamp(W * 0.1, 20, 200), y = clamp(H * 0.09, 36, 100), w = W - x * 2;
-    Art.text(ctx, S.help_title, W / 2, y, clamp(W * 0.05, 24, 44), PAL.phosHi, "center");
-    var fs = clamp(W * 0.016, 11, 16), yy = y + fs * 2.4;
-    for (var i = 0; i < S.help_lines.length; i++) yy += Art.wrapText(ctx, "• " + S.help_lines[i], W / 2, yy, w, fs, PAL.text) * (fs + 4) + 6;
+    renderSceneBackground(); var x = clamp(W * 0.08, 18, 180), y = clamp(H * 0.07, 30, 90), w = W - x * 2;
+    Art.text(ctx, S.help_title, W / 2, y, clamp(W * 0.045, 22, 40), PAL.phosHi, "center");
+    var fs = clamp(W * 0.015, 11, 15), yy = y + fs * 2.2;
+    for (var i = 0; i < S.help_lines.length; i++) yy += Art.wrapText(ctx, "• " + S.help_lines[i], W / 2, yy, w, fs, PAL.text) * (fs + 4) + 5;
     yy += 6; Art.wrapText(ctx, S.help_controls, W / 2, yy, w, fs * 0.92, PAL.amber);
-    UI.backBtn = { x: W / 2 - 90, y: H - clamp(H * 0.12, 56, 110), w: 180, h: 48 };
-    Art.button(ctx, UI.backBtn, S.menu_back, { hover: UI.hover === "back" }); Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
+    UI.backBtn = { x: W / 2 - 90, y: H - clamp(H * 0.11, 54, 100), w: 180, h: 46 }; Art.button(ctx, UI.backBtn, S.menu_back, { hover: UI.hover === "back" }); Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
   }
   function renderOptions() {
-    renderSceneBackground();
-    var y = clamp(H * 0.16, 50, 140); Art.text(ctx, S.options_title, W / 2, y, clamp(W * 0.05, 24, 44), PAL.phosHi, "center");
-    var rows = [[S.opt_sound, "sound"], [S.opt_shake, "shake"], [S.opt_scanlines, "scanlines"]];
-    UI.optHit = []; var rw = clamp(W * 0.6, 280, 460), rx = (W - rw) / 2, rh = 54, ry = y + 40;
-    for (var i = 0; i < rows.length; i++) { var r = { x: rx, y: ry + i * (rh + 12), w: rw, h: rh };
-      ctx.fillStyle = "rgba(10,14,20,0.5)"; Art.rrect(ctx, r.x, r.y, r.w, r.h, 6); ctx.fill(); ctx.strokeStyle = "rgba(90,100,114,0.5)"; Art.rrect(ctx, r.x, r.y, r.w, r.h, 6); ctx.stroke();
-      Art.text(ctx, rows[i][0], r.x + 14, r.y + r.h / 2 + 6, 16, PAL.text, "left");
-      var on = OPT[rows[i][1]], tr = { x: r.x + r.w - 86, y: r.y + 11, w: 72, h: 32 }; Art.button(ctx, tr, on ? S.opt_on : S.opt_off, { primary: on }); UI.optHit.push({ r: tr, key: rows[i][1] }); }
-    UI.backBtn = { x: W / 2 - 90, y: ry + rows.length * (rh + 12) + 16, w: 180, h: 48 };
-    Art.button(ctx, UI.backBtn, S.menu_back, { hover: UI.hover === "back" }); Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
+    renderSceneBackground(); var y = clamp(H * 0.16, 50, 140); Art.text(ctx, S.options_title, W / 2, y, clamp(W * 0.05, 24, 44), PAL.phosHi, "center");
+    var rows = [[S.opt_sound, "sound"], [S.opt_shake, "shake"], [S.opt_scanlines, "scanlines"]]; UI.optHit = [];
+    var rw = clamp(W * 0.6, 280, 460), rx = (W - rw) / 2, rh = 54, ry = y + 40;
+    for (var i = 0; i < rows.length; i++) { var r = { x: rx, y: ry + i * (rh + 12), w: rw, h: rh }; ctx.fillStyle = "rgba(10,14,20,0.5)"; Art.rrect(ctx, r.x, r.y, r.w, r.h, 6); ctx.fill(); ctx.strokeStyle = "rgba(90,100,114,0.5)"; Art.rrect(ctx, r.x, r.y, r.w, r.h, 6); ctx.stroke();
+      Art.text(ctx, rows[i][0], r.x + 14, r.y + r.h / 2 + 6, 16, PAL.text, "left"); var on = OPT[rows[i][1]], tr = { x: r.x + r.w - 86, y: r.y + 11, w: 72, h: 32 }; Art.button(ctx, tr, on ? S.opt_on : S.opt_off, { primary: on }); UI.optHit.push({ r: tr, key: rows[i][1] }); }
+    UI.backBtn = { x: W / 2 - 90, y: ry + rows.length * (rh + 12) + 16, w: 180, h: 48 }; Art.button(ctx, UI.backBtn, S.menu_back, { hover: UI.hover === "back" }); Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
   }
   function renderEnd() {
-    renderSceneBackground(); ctx.fillStyle = "rgba(2,4,8,0.74)"; ctx.fillRect(0, 0, W, H);
-    var win = G.won; var title = win ? S.win_title : G.endKind === "hull" ? S.lose_hull : S.lose_oxygen;
-    var body = win ? S.win_body : G.endKind === "hull" ? S.lose_hull_body : S.lose_oxygen_body;
+    renderSceneBackground(); ctx.fillStyle = "rgba(2,4,8,0.76)"; ctx.fillRect(0, 0, W, H);
+    var win = G.won, title = win ? S.win_title : G.endKind === "hull" ? S.lose_hull : S.lose_oxygen, body = win ? S.win_body : G.endKind === "hull" ? S.lose_hull_body : S.lose_oxygen_body;
     var y = clamp(H * 0.2, 70, 190); Art.text(ctx, title, W / 2, y, clamp(W * 0.06, 28, 56), win ? PAL.bioHi : PAL.bloodHi, "center");
     Art.wrapText(ctx, body, W / 2, y + clamp(W * 0.05, 34, 56), clamp(W * 0.7, 280, 720), clamp(W * 0.018, 13, 19), PAL.text);
     Art.text(ctx, fmt(S.end_depth, { d: Math.floor(G.depth), haul: G.haul }), W / 2, y + clamp(W * 0.05, 34, 56) + 104, 14, PAL.amber, "center");
-    Art.text(ctx, "Lore recovered: " + G.loreSeen.length + "/" + LORE.length, W / 2, y + clamp(W * 0.05, 34, 56) + 126, 13, PAL.textDim, "center");
-    UI.contBtn = { x: W / 2 - 120, y: H - clamp(H * 0.16, 84, 140), w: 240, h: 52 };
-    Art.button(ctx, UI.contBtn, S.again, { primary: true, hover: UI.hover === "cont" }); Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
+    UI.contBtn = { x: W / 2 - 120, y: H - clamp(H * 0.16, 84, 140), w: 240, h: 52 }; Art.button(ctx, UI.contBtn, S.again, { primary: true, hover: UI.hover === "cont" }); Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
   }
 
   // ---------------- input ----------------
   var UI = { overlay: null, hover: null, menu: [], optHit: [] };
-  var kb = { thrust: false, reverse: false, left: false, right: false };
-  var pad = { thrust: false, reverse: false, left: false, right: false };
-  var pointers = {}; // id -> {x,y}
-  function controls() {
-    var ptrHeld = { thrust: false, reverse: false, left: false, right: false };
-    for (var id in pointers) { var p = pointers[id];
-      if (inside(L.btn.thrust, p)) ptrHeld.thrust = true; if (inside(L.btn.left, p)) ptrHeld.left = true; if (inside(L.btn.right, p)) ptrHeld.right = true; }
-    return { thrust: kb.thrust || pad.thrust || ptrHeld.thrust, reverse: kb.reverse || pad.reverse || ptrHeld.reverse,
-      left: kb.left || pad.left || ptrHeld.left, right: kb.right || pad.right || ptrHeld.right };
-  }
+  var holdTimer = null, holdFired = false, holdCell = null;
   function pt(e) { var rect = canvas.getBoundingClientRect(); var s = e.touches && e.touches[0] ? e.touches[0] : (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e; return { x: s.clientX - rect.left, y: s.clientY - rect.top }; }
+  function gridCellAt(p) { if (!L._grid) return null; var g = L._grid; var cx = Math.floor((p.x - g.gx) / (g.cell + g.gap)), cy = Math.floor((p.y - g.gy) / (g.cell + g.gap)); if (cx < 0 || cy < 0 || cx >= G.gw || cy >= G.gh) return null; return { x: cx, y: cy }; }
 
-  function tapAt(p) { // discrete buttons; returns true if handled
-    if (!G) return false; Audio.init();
-    if (UI.overlay) { if (UI.overlay === "options" && UI.optHit) for (var i = 0; i < UI.optHit.length; i++) if (inside(UI.optHit[i].r, p)) { OPT[UI.optHit[i].key] = !OPT[UI.optHit[i].key]; saveOpt(); Audio.setEnabled(OPT.sound); Audio.card(); return true; } if (inside(UI.backBtn, p)) { UI.overlay = null; Audio.card(); } return true; }
-    if (G.scene === "dive") {
-      if (inside(L.btn.ping, p)) { ping(); return true; }
-      if (inside(L.btn.light, p)) { toggleLight(); return true; }
-      if (inside(L.btn.brief, p)) { UI.overlay = "help"; return true; }
-      return false; // thrust/turn handled as holds
-    }
-    if (G.scene === "end") { if (inside(UI.contBtn, p)) { Audio.card(); startDive(); } return true; }
-    for (var m = 0; m < UI.menu.length; m++) if (inside(UI.menu[m].r, p)) { var act = UI.menu[m].act; Audio.card(); if (act === "dive") startDive(); else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; return true; }
-    return true;
+  function onDown(p) {
+    Audio.init(); if (!G) return;
+    if (UI.overlay) { if (UI.overlay === "options" && UI.optHit) for (var i = 0; i < UI.optHit.length; i++) if (inside(UI.optHit[i].r, p)) { OPT[UI.optHit[i].key] = !OPT[UI.optHit[i].key]; saveOpt(); Audio.setEnabled(OPT.sound); Audio.card(); return; } if (inside(UI.backBtn, p)) { UI.overlay = null; Audio.card(); } return; }
+    if (G.scene === "dive") return onDiveDown(p);
+    if (G.scene === "end") { if (inside(UI.contBtn, p)) { Audio.card(); startRun(); } return; }
+    for (var m = 0; m < UI.menu.length; m++) if (inside(UI.menu[m].r, p)) { var act = UI.menu[m].act; Audio.card(); if (act === "dive") startRun(); else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; return; }
   }
-
-  canvas.addEventListener("mousedown", function (e) { pointers["m"] = pt(e); tapAt(pt(e)); });
-  canvas.addEventListener("mousemove", function (e) { var p = pt(e); if (pointers["m"]) pointers["m"] = p; onHover(p); });
-  window.addEventListener("mouseup", function () { delete pointers["m"]; });
-  canvas.addEventListener("touchstart", function (e) { e.preventDefault(); for (var i = 0; i < e.changedTouches.length; i++) { var tt = e.changedTouches[i]; var p = ptTouch(tt); pointers[tt.identifier] = p; tapAt(p); } }, { passive: false });
-  canvas.addEventListener("touchmove", function (e) { e.preventDefault(); for (var i = 0; i < e.changedTouches.length; i++) { var tt = e.changedTouches[i]; if (pointers[tt.identifier]) pointers[tt.identifier] = ptTouch(tt); } }, { passive: false });
-  canvas.addEventListener("touchend", function (e) { e.preventDefault(); for (var i = 0; i < e.changedTouches.length; i++) delete pointers[e.changedTouches[i].identifier]; }, { passive: false });
-  canvas.addEventListener("touchcancel", function (e) { for (var i = 0; i < e.changedTouches.length; i++) delete pointers[e.changedTouches[i].identifier]; });
-  function ptTouch(tt) { var rect = canvas.getBoundingClientRect(); return { x: tt.clientX - rect.left, y: tt.clientY - rect.top }; }
+  function onDiveDown(p) {
+    if (inside(L.btn.ping, p)) { ping(); return; }
+    if (inside(L.btn.light, p)) { toggleLight(); return; }
+    if (inside(L.btn.brief, p)) { UI.overlay = "help"; return; }
+    var d = dpadRects();
+    if (inside(d.up, p)) { tryDrive(0, -1); return; } if (inside(d.down, p)) { tryDrive(0, 1); return; }
+    if (inside(d.left, p)) { tryDrive(-1, 0); return; } if (inside(d.right, p)) { tryDrive(1, 0); return; }
+    // tap a grid cell: adjacent -> drive into it; (hold handled separately -> flag)
+    var gc = gridCellAt(p);
+    if (gc) { var ddx = gc.x - G.sub.cx, ddy = gc.y - G.sub.cy; if (Math.abs(ddx) + Math.abs(ddy) === 1) tryDrive(ddx, ddy); }
+  }
   function onHover(p) { UI.hover = null; if (!G) return;
     if (UI.overlay) { if (inside(UI.backBtn, p)) UI.hover = "back"; return; }
-    if (G.scene === "dive") { var b = L.btn; if (inside(b.thrust, p)) UI.hover = "thrust"; else if (inside(b.left, p)) UI.hover = "left"; else if (inside(b.right, p)) UI.hover = "right"; else if (inside(b.ping, p)) UI.hover = "ping"; else if (inside(b.light, p)) UI.hover = "light"; else if (inside(b.brief, p)) UI.hover = "brief"; return; }
+    if (G.scene === "dive") { if (inside(L.btn.ping, p)) UI.hover = "ping"; else if (inside(L.btn.light, p)) UI.hover = "light"; else if (inside(L.btn.brief, p)) UI.hover = "brief"; else { var d = dpadRects(); for (var key in d) if (inside(d[key], p)) { UI.hover = key; break; } } return; }
     if (G.scene === "end") { if (inside(UI.contBtn, p)) UI.hover = "cont"; return; }
     for (var m = 0; m < UI.menu.length; m++) if (inside(UI.menu[m].r, p)) UI.hover = "m" + m;
   }
+
+  canvas.addEventListener("mousedown", function (e) { onDown(pt(e)); });
+  canvas.addEventListener("mousemove", function (e) { onHover(pt(e)); });
+  canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); if (G && G.scene === "dive" && !UI.overlay) { var gc = gridCellAt(pt(e)); if (gc) flagCell(cell(gc.x, gc.y)); } });
+  canvas.addEventListener("touchstart", function (e) { e.preventDefault(); var p = pt(e); holdFired = false; holdCell = (G && G.scene === "dive" && !UI.overlay) ? gridCellAt(p) : null;
+    if (holdCell) { var hc = holdCell; holdTimer = setTimeout(function () { holdFired = true; flagCell(cell(hc.x, hc.y)); }, 380); }
+    if (!holdCell) onDown(p); }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) { e.preventDefault(); if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } }, { passive: false });
+  canvas.addEventListener("touchend", function (e) { e.preventDefault(); if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } if (holdFired) return; onDown(pt(e)); }, { passive: false });
 
   window.addEventListener("keydown", function (e) {
     var code = e.code; if (!G) return;
     if (UI.overlay) { if (code === "Escape" || code === "Enter" || code === "Space" || code === "KeyH") { UI.overlay = null; e.preventDefault(); } return; }
     if (code === "KeyH") { UI.overlay = "help"; e.preventDefault(); return; }
     if (G.scene === "dive") {
-      if (code === "KeyW" || code === "ArrowUp") { kb.thrust = true; e.preventDefault(); }
-      else if (code === "KeyS" || code === "ArrowDown") { kb.reverse = true; e.preventDefault(); }
-      else if (code === "KeyA" || code === "ArrowLeft") { kb.left = true; e.preventDefault(); }
-      else if (code === "KeyD" || code === "ArrowRight") { kb.right = true; e.preventDefault(); }
+      if (code === "KeyW" || code === "ArrowUp") { tryDrive(0, -1); e.preventDefault(); }
+      else if (code === "KeyS" || code === "ArrowDown") { tryDrive(0, 1); e.preventDefault(); }
+      else if (code === "KeyA" || code === "ArrowLeft") { tryDrive(-1, 0); e.preventDefault(); }
+      else if (code === "KeyD" || code === "ArrowRight") { tryDrive(1, 0); e.preventDefault(); }
       else if (code === "Space") { ping(); e.preventDefault(); }
+      else if (code === "KeyF") { flagFaced(); e.preventDefault(); }
       else if (code === "KeyL") { toggleLight(); e.preventDefault(); }
       else if (code === "Escape") { UI.overlay = "options"; }
-    } else if (G.scene === "end") { if (code === "Enter" || code === "Space") { startDive(); e.preventDefault(); } }
-    else { if (code === "Enter" || code === "Space") { startDive(); e.preventDefault(); } }
-  });
-  window.addEventListener("keyup", function (e) {
-    var code = e.code;
-    if (code === "KeyW" || code === "ArrowUp") kb.thrust = false;
-    else if (code === "KeyS" || code === "ArrowDown") kb.reverse = false;
-    else if (code === "KeyA" || code === "ArrowLeft") kb.left = false;
-    else if (code === "KeyD" || code === "ArrowRight") kb.right = false;
+    } else if (G.scene === "end") { if (code === "Enter" || code === "Space") { startRun(); e.preventDefault(); } }
+    else { if (code === "Enter" || code === "Space") { startRun(); e.preventDefault(); } }
   });
 
-  // gamepad
   var padPrev = {};
   function pollPad() {
     var pads = navigator.getGamepads ? navigator.getGamepads() : []; if (!G) return;
     for (var g = 0; g < pads.length; g++) { var gp = pads[g]; if (!gp) continue; var b = gp.buttons, ax = gp.axes || []; G.padActive = true;
       function pressed(i) { return b[i] && b[i].pressed && !padPrev[i]; }
-      var ly = ax[1] || 0, lx = ax[0] || 0;
-      pad.thrust = (b[12] && b[12].pressed) || ly < -0.4;
-      pad.reverse = (b[13] && b[13].pressed) || ly > 0.5;
-      pad.left = (b[14] && b[14].pressed) || lx < -0.4;
-      pad.right = (b[15] && b[15].pressed) || lx > 0.4;
       if (UI.overlay) { if (pressed(0) || pressed(1) || pressed(9)) UI.overlay = null; }
-      else if (G.scene === "dive") { if (pressed(0)) ping(); if (pressed(2)) toggleLight(); if (pressed(3) || pressed(9)) UI.overlay = "help"; }
-      else if (G.scene === "end") { if (pressed(0) || pressed(9)) startDive(); }
+      else if (G.scene === "dive") {
+        if (pressed(12) || (ax[1] < -0.5 && !padPrev._u)) tryDrive(0, -1); if (pressed(13) || (ax[1] > 0.5 && !padPrev._d)) tryDrive(0, 1);
+        if (pressed(14) || (ax[0] < -0.5 && !padPrev._l)) tryDrive(-1, 0); if (pressed(15) || (ax[0] > 0.5 && !padPrev._r)) tryDrive(1, 0);
+        padPrev._u = ax[1] < -0.5; padPrev._d = ax[1] > 0.5; padPrev._l = ax[0] < -0.5; padPrev._r = ax[0] > 0.5;
+        if (pressed(0)) ping(); if (pressed(2)) flagFaced(); if (pressed(1)) toggleLight(); if (pressed(3) || pressed(9)) UI.overlay = "help";
+      } else if (G.scene === "end") { if (pressed(0) || pressed(9)) startRun(); }
       else { if (pressed(12)) G.menuSel = (G.menuSel + UI.menu.length - 1) % (UI.menu.length || 1); if (pressed(13)) G.menuSel = (G.menuSel + 1) % (UI.menu.length || 1);
-        if (pressed(0) || pressed(9)) { var act = UI.menu[G.menuSel] ? UI.menu[G.menuSel].act : "dive"; if (act === "dive") startDive(); else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; } }
+        if (pressed(0) || pressed(9)) { var act = UI.menu[G.menuSel] ? UI.menu[G.menuSel].act : "dive"; if (act === "dive") startRun(); else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; } }
       for (var i = 0; i < b.length; i++) padPrev[i] = b[i] && b[i].pressed;
     }
   }
@@ -453,22 +491,16 @@
   // ---------------- loop ----------------
   var STEP = 1000 / 60, acc = 0, last = perfTime(), paused = false, frames = 0, fpsAt = last, fpsv = 0;
   function perfTime() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
-  window.addEventListener("blur", function () { paused = true; for (var key in kb) kb[key] = false; });
+  window.addEventListener("blur", function () { paused = true; });
   window.addEventListener("focus", function () { paused = false; last = perfTime(); });
   document.addEventListener("visibilitychange", function () { paused = document.hidden; if (!paused) last = perfTime(); });
   function frame() {
-    requestAnimationFrame(frame);
-    var now = perfTime(); if (paused) { last = now; return; }
-    acc += now - last; last = now; if (acc > 200) acc = 200;
-    pollPad();
-    while (acc >= STEP) { if (G) update(STEP); acc -= STEP; }
-    render();
-    if (dev) { frames++; if (now - fpsAt >= 500) { fpsv = Math.round(frames * 1000 / (now - fpsAt)); frames = 0; fpsAt = now; document.getElementById("dev").textContent = fpsv + " fps  " + (G ? G.scene + " d" + Math.floor(G.depth) + " c" + G.contacts.length : ""); } }
+    requestAnimationFrame(frame); var now = perfTime(); if (paused) { last = now; return; }
+    acc += now - last; last = now; if (acc > 200) acc = 200; pollPad();
+    while (acc >= STEP) { if (G) update(STEP); acc -= STEP; } render();
+    if (dev) { frames++; if (now - fpsAt >= 500) { fpsv = Math.round(frames * 1000 / (now - fpsAt)); frames = 0; fpsAt = now; document.getElementById("dev").textContent = fpsv + " fps  " + (G ? G.scene + " L" + G.layer + " hull" + Math.round(G.hull) : ""); } }
   }
 
-  newRun(randomSeed());
-  resize();
-  requestAnimationFrame(frame);
-  window.DREADNOUGHT = { G: function () { return G; }, newRun: newRun, startDive: startDive, ping: ping, toggleLight: toggleLight, OPT: OPT,
-    setHeld: function (o) { for (var key in o) kb[key] = o[key]; } };
+  newRun(randomSeed()); resize(); requestAnimationFrame(frame);
+  window.DREADNOUGHT = { G: function () { return G; }, newRun: newRun, startRun: startRun, drive: tryDrive, ping: ping, flagFaced: flagFaced, toggleLight: toggleLight, OPT: OPT };
 })();

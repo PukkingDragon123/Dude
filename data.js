@@ -1,77 +1,71 @@
-/* DREADNOUGHT v3 — Iron Lung-like deep-sea horror. Pure data/config.
- * You pilot a tiny submarine through a pitch-black abyss, navigating by RADAR:
- * ping to tell loot from monster, thrust forward through 3D water to collect it,
- * peek with the headlight, and pray the dark stays empty. No shop, no upgrades.
+/* DREADNOUGHT v4 — Minesweeper-deduction fused into first-person submarine navigation.
+ * The CRT monitor IS a top-down minesweeper grid; the sub is one cell. Driving into a cell
+ * reveals it (numbers = adjacent monsters). Deduce the safe path down to the descent hatch.
+ * Diegetic horror UI (oxygen tank + flooding cabin). No shop, no text HUD.
  * Tune one number at a time (game-design-system §0.6/§9.5). */
 (function (root) {
   "use strict";
 
   var CFG = {
     startHull: 100, maxHull: 100,
-    startOxygen: 200,        // seconds of air — the dread clock
-    oxygenDrain: 1.0,        // air lost per second, baseline
-    speed: 7.0,              // world units / sec at full thrust
-    reverseFrac: 0.5,        // reverse thrust fraction
-    turnSpeed: 1.5,          // rad / sec
-    fov: 1.25,               // forward view field of view (radians)
-    headlightRange: 30,      // how far the light reaches
-    collectRange: 4.2,       // distance to grab loot / get struck by a monster
-    maxRadar: 64,            // radar + spawn range (world units)
-    pingThreat: 18,          // THREAT added by an active ping (noise)
-    lightThreat: 7,          // THREAT / sec while the headlight is on
-    moveThreat: 3,           // THREAT / sec while thrusting
-    threatDecay: 6,          // THREAT / sec lost while running silent
-    wakeThreat: 55,          // above this the nearest monster wakes and hunts
-    panicThreat: 80,         // above this every monster hunts; the deep notices you
-    monsterHuntSpeed: 0.62,  // fraction of sub top speed when hunting
-    monsterDamage: [14, 26], // hull damage on a strike
-    monsterSanity: [8, 16],
-    targetContacts: 7,       // how many contacts to keep live in the field
-    sourceDepth: 2400,       // reach this depth (metres) to find the Source -> win
-    depthPerUnit: 0.9,       // metres of depth gained per world-unit travelled forward
+    startOxygen: 220,        // seconds of air (the dread clock)
+    idleDrain: 0.55,         // air lost per second while thinking
+    moveCost: 4,             // air spent per completed drive into a new cell
+    ventRefill: 34,          // air refunded by a thermal vent cell
+    moveGlide: 0.34,         // seconds the sub glides between cells (the "transit" + scare window)
+    pingsStart: 3,           // sonar pings granted at the start of each layer
+    pingCone: 3,             // how many cells deep a ping reveals numbers
+    threatPing: 18, threatLight: 7, threatMove: 2.5, threatDecay: 6,
+    wake: 55,                // threat at which the nearest monster wakes into a STALKER
+    panic: 82,               // threat at which the deep fully notices you
+    stalkerStep: 1,          // cells a stalker closes per player move
+    layers: 6,               // descend 6 layers; the deepest holds the Source
   };
 
-  // ---- loot / contact archetypes (what a non-monster blip can be) ----
-  var LOOT = {
-    data:     { name: "Data Cache",   kind: "data",     value: [12, 26],   shape: "data" },
-    artifact: { name: "Resonant Idol",kind: "artifact", value: [70, 150],  shape: "artifact", deep: 600 },
-    relic:    { name: "Glyph Pillar", kind: "artifact", value: [180, 360], shape: "artifact", deep: 1400 },
-    vent:     { name: "Air Pocket",   kind: "vent",     o2: 35,            shape: "vent" },
-    source:   { name: "THE SOURCE",   kind: "source",   value: [0, 0],     shape: "anomaly" },
-  };
-
-  // ---- monsters (the blips you must NOT approach). reuse existing portraits. ----
-  var MONSTERS = {
-    angler:    { name: "Anglerfish",     tier: 1, shape: "angler",    dmg: [14, 22], lure: true },
-    swimmer:   { name: "Pale Swimmer",   tier: 2, shape: "swimmer",   dmg: [16, 24] },
-    squid:     { name: "Colossal Squid", tier: 2, shape: "squid",     dmg: [22, 32] },
-    leviathan: { name: "THE LEVIATHAN",  tier: 3, shape: "leviathan", dmg: [40, 60] },
-  };
-
-  // ---- depth-scaled spawn weighting. As you descend, monsters get worse and
-  //      loot gets richer. Picked by `pickSpawn(depthM)` logic in game.js. ----
-  var SPAWN = [
-    // depth(m) at/after which this table applies; monster chance; pools
-    { depth: 0,    monsterChance: 0.30, monsters: ["angler", "angler", "swimmer"], loot: ["data", "data", "data", "vent", "artifact"] },
-    { depth: 600,  monsterChance: 0.40, monsters: ["angler", "swimmer", "swimmer", "squid"], loot: ["data", "data", "vent", "artifact", "artifact"] },
-    { depth: 1400, monsterChance: 0.52, monsters: ["swimmer", "squid", "squid", "leviathan"], loot: ["data", "vent", "artifact", "relic"] },
-    { depth: 2000, monsterChance: 0.60, monsters: ["squid", "swimmer", "leviathan", "leviathan"], loot: ["artifact", "relic", "vent"] },
+  // ---- per-layer grid config (index 1..6). monsters/loot/vents are cell counts. ----
+  var LAYERS = [
+    null,
+    { gw: 7,  gh: 7,  monsters: 6,  loot: 7, vents: 3, depth: 240,  pool: ["angler", "angler", "hagfish"], lootPool: ["data", "data", "data", "artifact"] },
+    { gw: 8,  gh: 8,  monsters: 10, loot: 8, vents: 3, depth: 640,  pool: ["angler", "hagfish", "swimmer"], lootPool: ["data", "data", "artifact"] },
+    { gw: 8,  gh: 8,  monsters: 13, loot: 8, vents: 3, depth: 1200, pool: ["swimmer", "squid", "angler"],   lootPool: ["data", "artifact", "relic"] },
+    { gw: 9,  gh: 9,  monsters: 17, loot: 9, vents: 4, depth: 2100, pool: ["swimmer", "squid", "squid"],    lootPool: ["artifact", "relic", "data"] },
+    { gw: 9,  gh: 9,  monsters: 20, loot: 9, vents: 4, depth: 3400, pool: ["squid", "swimmer", "bonewhale"],lootPool: ["relic", "artifact"] },
+    { gw: 9,  gh: 10, monsters: 18, loot: 8, vents: 5, depth: 5200, pool: ["squid", "bonewhale", "leviathan"], lootPool: ["relic", "artifact"], source: true },
   ];
 
+  // ---- monsters (the mines). single-cell so the deduction + safe-path guarantee stay clean;
+  //      variety from damage, tier and portrait. reuse existing drawPortrait shapes. ----
+  var MONSTERS = {
+    angler:    { name: "Anglerfish",     tier: 1, shape: "angler",    dmg: [14, 22] },
+    hagfish:   { name: "Hagfish Knot",   tier: 1, shape: "hagfish",   dmg: [12, 18] },
+    swimmer:   { name: "Pale Swimmer",   tier: 2, shape: "swimmer",   dmg: [16, 24] },
+    squid:     { name: "Colossal Squid", tier: 2, shape: "squid",     dmg: [22, 32] },
+    bonewhale: { name: "Bonewhale",      tier: 3, shape: "whale",     dmg: [26, 38] },
+    leviathan: { name: "THE LEVIATHAN",  tier: 4, shape: "leviathan", dmg: [40, 60] },
+  };
+
+  // ---- loot / cell contents (safe; NOT counted in numbers). ----
+  var LOOT = {
+    data:     { name: "Data Cache",    kind: "data",     value: [12, 26],   shape: "data" },
+    artifact: { name: "Resonant Idol", kind: "artifact", value: [70, 150],  shape: "artifact" },
+    relic:    { name: "Glyph Pillar",  kind: "artifact", value: [180, 360], shape: "artifact" },
+    vent:     { name: "Thermal Vent",  kind: "vent",     o2: 34,            shape: "vent" },
+    source:   { name: "THE SOURCE",    kind: "source",   value: [0, 0],     shape: "anomaly" },
+  };
+
   var LORE = [
-    "Dive log: The Admiralty calls the signal a beacon. It pulses every nine seconds, from below the charted floor.",
-    "No ports left to surface to. The hull is the world now. The radar is the only window.",
-    "The contacts move when the ping fades. I have stopped telling the men what the scope shows.",
-    "The signal is not code. It is nine seconds of a voice, slowed until it is only weight.",
-    "We found K-219, the first sub sent down. Her log ends mid-word. Her reactor is still warm.",
-    "Run silent. The light is a bell, and something down here answers bells.",
+    "The Admiralty calls the signal a beacon. It pulses every nine seconds, from below the charted floor.",
+    "No ports left to surface to. The hull is the world now. The monitor is the only window.",
+    "Run silent. The ping is a bell, and something down here answers bells.",
+    "K-219 is on the scope. The first sub sent down. Her log ends mid-word.",
+    "The pressure has a texture this deep. It presses thoughts flat.",
     "It is not a beacon and not a creature. It is a door — and it has been knocking.",
   ];
 
   root.DN = root.DN || {};
   root.DN.CFG = CFG;
-  root.DN.LOOT = LOOT;
+  root.DN.LAYERS = LAYERS;
   root.DN.MONSTERS = MONSTERS;
-  root.DN.SPAWN = SPAWN;
+  root.DN.LOOT = LOOT;
   root.DN.LORE = LORE;
 })(typeof window !== "undefined" ? window : this);
