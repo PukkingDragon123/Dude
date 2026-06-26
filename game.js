@@ -29,7 +29,7 @@
     var bw = Math.max(160, Math.round(L.porthole.w / SCALE2())), bh = Math.max(110, Math.round(L.porthole.h / SCALE2()));
     buf.width = bw; buf.height = bh; Art.rebake(bw, bh);
   }
-  function SCALE2() { SCALE = Math.max(2, Math.round(L.porthole.w / 360)); return SCALE; }
+  function SCALE2() { SCALE = clamp(L.porthole.w / 600, 1.4, 2.2); return SCALE; }
   window.addEventListener("resize", resize); window.addEventListener("orientationchange", resize);
 
   // ---------------- layout ----------------
@@ -133,6 +133,31 @@
     if (!c || c.seen || c.mon) return; c.seen = true;
     if (c.n === 0) { for (var ny = -1; ny <= 1; ny++) for (var nx = -1; nx <= 1; nx++) { if (!nx && !ny) continue; var nb = cell(c.x + nx, c.y + ny); if (nb && !nb.mon && !nb.seen) seeCell(nb); } }
   }
+  function recomputeNumbers() {
+    for (var y = 0; y < G.gh; y++) for (var x = 0; x < G.gw; x++) { var t = cell(x, y); if (t.mon) { t.n = 0; continue; } var cnt = 0; for (var ny = -1; ny <= 1; ny++) for (var nx = -1; nx <= 1; nx++) { if (!nx && !ny) continue; var nb = cell(x + nx, y + ny); if (nb && nb.mon) cnt++; } t.n = cnt; }
+  }
+  function nearestMonDist() { var best = 99; for (var i = 0; i < G.cells.length; i++) { var c = G.cells[i]; if (c.mon && !c.triggered) { var d = Math.abs(c.x - G.sub.cx) + Math.abs(c.y - G.sub.cy); if (d < best) best = d; } } return best; }
+  // THE TWIST: the Angler moves. It slips to an adjacent FOG cell, clearing the flag you set on its
+  // old tile (your mark is now a lie) and re-arming an unmarked one. Numbers shift; a solved board lies.
+  function moveAnglers() {
+    var chance = (G.threat >= CFG.wake ? 0.5 : 0.16) + (G.layer - 1) * 0.05;
+    var moved = false, dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    for (var i = 0; i < G.cells.length; i++) {
+      var c = G.cells[i]; if (!c.mon || c.triggered) continue; if (!G.rng.chance(chance)) continue;
+      var cands = [];
+      for (var d = 0; d < 4; d++) { var nx = c.x + dirs[d][0], ny = c.y + dirs[d][1], tc = cell(nx, ny);
+        if (!tc || tc.mon || tc.seen || tc.hatch || tc.source) continue;
+        if (nx === G.sub.cx && ny === G.sub.cy) continue; // never slide onto the sub (no free kill)
+        cands.push(tc); }
+      if (!cands.length) continue;
+      var dest = G.rng.pick(cands);
+      c.mon = false; var mid = c.monId; c.monId = null; c.flagged = false; // the mark on the old tile is cleared — it lied
+      dest.mon = true; dest.monId = mid; dest.flagged = false;
+      moved = true;
+    }
+    if (moved) { recomputeNumbers(); G.lamp.wake = Math.max(G.lamp.wake, 0.7); Audio.alert(); G.flash = Math.max(G.flash, 0.16); G.flashCol = "120,40,160"; }
+    return moved;
+  }
 
   function startRun() { G.layer = 1; G.hull = effMaxHull(); G.oxygen = effMaxOxygen(); G.haul = 0; G.threat = 0; G.lightOn = false; G.leak = 0; G.scare = null; G.won = false; G.endKind = null; genLayer(1); G.scene = "dive"; Audio.setMusic("ambient"); }
   function descend() { Audio.descend(); if (OPT.shake) G.shake = 6; var nl = G.layer + 1; if (nl > CFG.layers) { winRun(); return; } genLayer(nl); G.threat = clamp(G.threat - 20, 0, 100); }
@@ -162,7 +187,7 @@
   }
   function afterMove() {
     G.threat = clamp(G.threat + CFG.threatMove, 0, 100);
-    stalkerStep();
+    moveAnglers();
     if (G.oxygen <= 0) { G.oxygen = 0; return die("oxygen"); }
     if (G.hull <= 0) return die("hull");
   }
@@ -176,7 +201,7 @@
     if (G.scene !== "dive" || G.transit || G.scare) return; var c = curCell();
     if (!c || !c.lootId || c.collected || c.kind === "vent") return;
     collect(c); G.onLoot = false; G.oxygen -= 2; G.threat = clamp(G.threat + 6, 0, 100);
-    if (G.threat >= CFG.wake) stalkerWake();
+    if (G.threat >= CFG.wake) moveAnglers();
   }
   function patch() { // hands-on leak repair
     if (G.scene !== "dive" || G.transit) return;
@@ -210,39 +235,13 @@
       if (c && !c.mon && !c.seen) seeCell(c); // ping reveals numbers of SAFE cells only; monsters stay fog (deduce them)
     } }
     Audio.ping();
-    if (G.threat >= CFG.wake) stalkerWake();
-    if (G.threat >= CFG.panic) stalkerWake();
+    if (G.threat >= CFG.wake) moveAnglers(); // a loud ping makes the Anglers shift
   }
   function toggleLight() { if (G.scene !== "dive") return; Audio.init(); G.lightOn = !G.lightOn; Audio.vent(); }
   function flagFaced() { if (G.scene !== "dive" || G.transit) return; var c = cell(G.sub.cx + G.facing.dx, G.sub.cy + G.facing.dy); flagCell(c); }
   function flagCell(c) { if (!c || c.seen) return; c.flagged = !c.flagged; G.confirmDir = null; Audio.card(); }
 
-  // ---------------- stalker (the hunt) ----------------
-  function stalkerWake() {
-    if (G.stalker && G.stalker.active) return;
-    var best = null, bd = 1e9; for (var i = 0; i < G.cells.length; i++) { var c = G.cells[i]; if (c.mon && !c.triggered) { var dd = Math.abs(c.x - G.sub.cx) + Math.abs(c.y - G.sub.cy); if (dd < bd && dd > 1) { bd = dd; best = c; } } }
-    if (!best) return;
-    G.stalker = { x: best.x, y: best.y, monId: best.monId, shape: MON[best.monId].shape, active: true, cool: 0 };
-    G.woke = true; G.lamp.wake = 1; Audio.alert(); Audio.setMusic("threat");
-  }
-  function stalkerStep() {
-    if (G.threat < CFG.wake * 0.6 && G.stalker) { G.stalker = null; return; } // it loses the scent in the silence
-    if (!G.stalker || !G.stalker.active) return;
-    var s = G.stalker; for (var step = 0; step < CFG.stalkerStep; step++) {
-      var dx = G.sub.cx - s.x, dy = G.sub.cy - s.y;
-      if (dx === 0 && dy === 0) break;
-      if (Math.abs(dx) >= Math.abs(dy)) s.x += dx > 0 ? 1 : -1; else s.y += dy > 0 ? 1 : -1;
-      if (s.x === G.sub.cx && s.y === G.sub.cy) { stalkerStrike(); break; }
-    }
-  }
-  function stalkerStrike() {
-    var def = MON[G.stalker.monId], dmg = G.rng.int(def.dmg[0], def.dmg[1]);
-    G.hull = clamp(G.hull - dmg, 0, CFG.maxHull); G.flash = 0.85; G.flashCol = "190,30,30"; if (OPT.shake) G.shake = 16;
-    G.lamp.hull = 1; Audio.roar(); Audio.damage();
-    G.scare = { shape: def.shape, name: def.name, until: G.time + 1.5, t0: G.time, tier: def.tier };
-    G.stalker = null; G.threat = clamp(G.threat - 30, 0, 100);
-    if (G.hull <= 0) die("hull");
-  }
+  // (the old "stalker" hunter is replaced by moveAnglers(): the mines themselves relocate.)
 
   // ---------------- update ----------------
   function update(dt) {
@@ -262,20 +261,20 @@
 
     // air clock
     G.oxygen -= CFG.idleDrain * s; if (G.oxygen <= 0) { G.oxygen = 0; return die("oxygen"); }
-    if (G.oxygen < CFG.startOxygen * 0.2) G.lamp.o2 = Math.max(G.lamp.o2, 0.5 + 0.5 * Math.sin(G.time * 5));
+    if (G.oxygen < effMaxOxygen() * 0.2) G.lamp.o2 = Math.max(G.lamp.o2, 0.5 + 0.5 * Math.sin(G.time * 5));
     // threat
     var add = 0; if (G.lightOn) add += lightThreatRate() * s;
     G.threat = clamp(G.threat + add - CFG.threatDecay * s, 0, 100);
     if (G.threat >= CFG.wake) G.lamp.wake = Math.max(G.lamp.wake, 0.5);
     // smooth leak severity toward hull damage (bilge pump keeps the cabin drier)
     var target = (1 - G.hull / effMaxHull()) * bilgeMult(); G.leak += (target - G.leak) * Math.min(1, s * 2);
-    // heartbeat from stalker proximity / low hull / low air
-    var hbScare = 0; if (G.stalker && G.stalker.active) { var sd = Math.abs(G.stalker.x - G.sub.cx) + Math.abs(G.stalker.y - G.sub.cy); hbScare = clamp(1 - sd / 6, 0, 1); }
-    G.heartbeat = Math.max(hbScare, G.leak > 0.7 ? G.leak : 0, G.oxygen < CFG.startOxygen * 0.12 ? 0.6 : 0);
+    // heartbeat from a nearby (unrevealed) Angler / low hull / low air
+    var nd = nearestMonDist(); var hbScare = nd <= 3 ? clamp(1 - (nd - 1) / 3, 0, 1) : 0;
+    G.heartbeat = Math.max(hbScare, G.leak > 0.7 ? G.leak : 0, G.oxygen < effMaxOxygen() * 0.12 ? 0.6 : 0);
     if (G.heartbeat > 0.06) { var iv = 1.1 - G.heartbeat * 0.7; G.hbT -= s; if (G.hbT <= 0) { G.hbT = iv; Audio.heartbeat(G.heartbeat); } } else G.hbT = 0;
     // ambient groan/drip when flooding & quiet
     if (G.leak > 0.25 && Math.sin(G.time * 0.7) > 0.995) Audio.groan && Audio.groan();
-    var wantThreat = G.threat >= CFG.wake || (G.stalker && G.stalker.active) || G.leak > 0.6;
+    var wantThreat = G.threat >= CFG.wake || nd <= 2 || G.leak > 0.6;
     if (Audio._which !== (wantThreat ? "threat" : "ambient")) Audio.setMusic(wantThreat ? "threat" : "ambient");
   }
 
@@ -295,13 +294,19 @@
     Art.drawForward(bctx, bw, bh, { contacts: forwardContacts(), snow: G.snow, lightOn: G.lightOn, threat: G.threat / 100, time: G.time, fov: 1.2, headlightRange: lightRange() });
   }
   function forwardContacts() {
-    var out = [], sp = 7, tp = G.transit ? G.transit.t : 0;
-    for (var d = 1; d <= 3; d++) { var tx = G.sub.cx + G.facing.dx * d, ty = G.sub.cy + G.facing.dy * d; var c = cell(tx, ty); if (!c) continue;
-      var rz = Math.max(0.8, d * sp - tp * sp * 0.9);
-      if (c.hatch) out.push({ rx: 0, ry: 0, rz: rz, kind: c.source ? "source" : "vent", isMonster: false });
-      else if (c.seen && c.lootId && !c.collected) out.push({ rx: 0, ry: 0, rz: rz, kind: c.kind, isMonster: false }); }
-    if (G.transit && G.transit.isMonster) out.push({ rx: 0, ry: 0, rz: Math.max(0.8, 7 - G.transit.t * 6.2), isMonster: true, monShape: G.transit.shape });
-    if (G.stalker && G.stalker.active) { var sdx = G.stalker.x - G.sub.cx, sdy = G.stalker.y - G.sub.cy; var fwd = sdx * G.facing.dx + sdy * G.facing.dy, lat = sdx * G.facing.dy - sdy * G.facing.dx; if (fwd > 0) out.push({ rx: lat * 4, ry: 0, rz: Math.max(1.2, fwd * 7), isMonster: true, monShape: G.stalker.shape }); }
+    var out = [], sp = 6.5, tp = G.transit ? G.transit.t : 0;
+    for (var d = 1; d <= 4; d++) {
+      var rz = Math.max(0.8, d * sp - tp * sp * 0.92);
+      for (var lat = -1; lat <= 1; lat++) {
+        if (lat !== 0 && d < 2) continue; // straight ahead near; widen the cone with distance
+        var tx = G.sub.cx + G.facing.dx * d - G.facing.dy * lat, ty = G.sub.cy + G.facing.dy * d + G.facing.dx * lat; var c = cell(tx, ty); if (!c) continue;
+        var rx = lat * 3.2;
+        if (c.mon && !c.triggered) out.push({ rx: rx, ry: 0.05, rz: rz, isMonster: true, monShape: MON[c.monId].shape }); // Anglers loom in the water (dim unless lit)
+        else if (lat === 0 && c.hatch) out.push({ rx: 0, ry: 0, rz: rz, kind: c.source ? "source" : "vent", isMonster: false });
+        else if (c.seen && c.lootId && !c.collected) out.push({ rx: rx, ry: 0, rz: rz, kind: c.kind, isMonster: false });
+      }
+    }
+    if (G.transit && G.transit.isMonster) out.push({ rx: 0, ry: 0.05, rz: Math.max(0.8, 6.5 - G.transit.t * 5.8), isMonster: true, monShape: G.transit.shape });
     return out;
   }
 
@@ -370,9 +375,6 @@
       else { ctx.strokeStyle = PAL.bioHi; ctx.lineWidth = 2; var hs = cellSz * 0.3, mcx = hxp + cellSz / 2, mcy = hyp + cellSz / 2;
         ctx.beginPath(); ctx.moveTo(mcx - hs, mcy - hs * 0.5); ctx.lineTo(mcx, mcy + hs * 0.6); ctx.lineTo(mcx + hs, mcy - hs * 0.5); ctx.stroke();
         ctx.beginPath(); ctx.arc(mcx, mcy, hs * 0.9, 0, 7); ctx.globalAlpha = 0.4 + 0.3 * Math.sin(G.time * 3); ctx.stroke(); ctx.globalAlpha = 1; } }
-    // stalker marker
-    if (G.stalker && G.stalker.active) { var sxp = gx + G.stalker.x * (cellSz + gap) + cellSz / 2, syp = gy + G.stalker.y * (cellSz + gap) + cellSz / 2;
-      ctx.save(); ctx.globalAlpha = 0.5 + 0.5 * Math.sin(G.time * 8); Art.glowDot(ctx, sxp, syp, cellSz * 0.5, PAL.bloodHi, 1); ctx.fillStyle = PAL.bloodHi; ctx.beginPath(); ctx.arc(sxp, syp, cellSz * 0.18, 0, 7); ctx.fill(); ctx.restore(); }
     // sub marker (lerp during transit) + facing
     var scx = G.sub.cx, scy = G.sub.cy; if (G.transit) { scx += G.transit.dx * G.transit.t * (G.transit.isMonster ? 0.5 : 1); scy += G.transit.dy * G.transit.t * (G.transit.isMonster ? 0.5 : 1); }
     var sxp2 = gx + scx * (cellSz + gap) + cellSz / 2, syp2 = gy + scy * (cellSz + gap) + cellSz / 2;
@@ -411,16 +413,14 @@
     Art.button(ctx, d.left, "◄", { hover: UI.hover === "left" }); Art.button(ctx, d.right, "►", { hover: UI.hover === "right" });
   }
 
-  function drawScare() {
-    var sc = G.scare, k = clamp((G.time - sc.t0) / 0.18, 0, 1); // fast pop-in
-    var ph = L.porthole;
-    // white-on-black pop frame
-    if (k < 0.4) { ctx.fillStyle = "rgba(220,235,235," + (0.5 * (1 - k / 0.4)).toFixed(2) + ")"; ctx.fillRect(ph.x, ph.y, ph.w, ph.h); }
-    ctx.save(); ctx.beginPath(); Art.rrect(ctx, ph.x, ph.y, ph.w, ph.h, 10); ctx.clip();
-    ctx.fillStyle = "#03070a"; ctx.fillRect(ph.x, ph.y, ph.w, ph.h);
-    var sz = Math.min(ph.w, ph.h) * (0.42 + 0.18 * k);
-    Art.drawPortrait(ctx, ph.x + ph.w / 2, ph.y + ph.h / 2, sz, { category: "creature", name: sc.name, id: 9 }, G.time);
-    ctx.restore();
+  function drawScare() { // full-screen takeover: the Angler rushes the glass and fills your view
+    var sc = G.scare, dur = Math.max(0.3, sc.until - sc.t0), k = clamp((G.time - sc.t0) / dur, 0, 1), lung = k * k;
+    ctx.fillStyle = "#04080c"; ctx.fillRect(0, 0, W, H);
+    var sz = Math.max(W, H) * (0.34 + lung * 0.95);
+    var jx = (Math.random() - 0.5) * 22 * (1 - k * 0.35), jy = (Math.random() - 0.5) * 22 * (1 - k * 0.35);
+    Art.drawAngler3D(ctx, W / 2 + jx, H * 0.47 + jy, sz, { yaw: Math.sin(G.time * 26) * 0.14, pitch: -0.03, mouth: clamp(0.3 + lung * 1.05, 0, 1), t: G.time, lit: 1, boss: sc.tier >= 3 });
+    if (k < 0.18) { ctx.fillStyle = "rgba(240,245,245," + (0.7 * (1 - k / 0.18)).toFixed(2) + ")"; ctx.fillRect(0, 0, W, H); }
+    ctx.fillStyle = "rgba(150,18,22," + (0.3 * (1 - k)).toFixed(2) + ")"; ctx.fillRect(0, 0, W, H);
   }
 
   // ---------------- title / help / options / end ----------------
@@ -619,5 +619,5 @@
   }
 
   newRun(randomSeed()); resize(); requestAnimationFrame(frame);
-  window.DREADNOUGHT = { G: function () { return G; }, newRun: newRun, startRun: startRun, drive: tryDrive, ping: ping, flagFaced: flagFaced, toggleLight: toggleLight, excavate: excavate, patch: patch, crank: crank, surface: surface, buy: buy, buyPlushie: buyPlushie, OPT: OPT };
+  window.DREADNOUGHT = { G: function () { return G; }, newRun: newRun, startRun: startRun, drive: tryDrive, ping: ping, flagFaced: flagFaced, toggleLight: toggleLight, excavate: excavate, patch: patch, crank: crank, surface: surface, buy: buy, buyPlushie: buyPlushie, moveAnglers: moveAnglers, OPT: OPT };
 })();

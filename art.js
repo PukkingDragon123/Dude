@@ -41,13 +41,13 @@
     // grain: sparse dither speckle
     var g = makeCanvas(w, h), gx = g.getContext("2d");
     var img = gx.createImageData(w, h), d = img.data;
-    for (var i=0;i<w*h;i++){ var v = Math.random(); var a = v>0.93?38: v>0.86?18:0; var o=i*4;
+    for (var i=0;i<w*h;i++){ var v = Math.random(); var a = v>0.95?15: v>0.89?7:0; var o=i*4;
       d[o]=120; d[o+1]=150; d[o+2]=150; d[o+3]=a; }
     gx.putImageData(img,0,0); cache.grain = g;
-    // scanlines
+    // scanlines (lighter, every 3px)
     var s = makeCanvas(w, h), sx = s.getContext("2d");
-    sx.fillStyle = "rgba(0,0,0,0.20)";
-    for (var y=0;y<h;y+=2) sx.fillRect(0,y,w,1);
+    sx.fillStyle = "rgba(0,0,0,0.09)";
+    for (var y=0;y<h;y+=3) sx.fillRect(0,y,w,1);
     cache.scan = s;
   }
 
@@ -412,8 +412,8 @@
   function overlay(ctx, w, h, opts) {
     opts = opts||{};
     // vignette
-    var vg = ctx.createRadialGradient(w/2,h/2, Math.min(w,h)*0.3, w/2,h/2, Math.max(w,h)*0.72);
-    vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(0,0,0,0.72)");
+    var vg = ctx.createRadialGradient(w/2,h/2, Math.min(w,h)*0.42, w/2,h/2, Math.max(w,h)*0.74);
+    vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(0,0,0,0.5)");
     ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
     // scanlines
     if (opts.scanlines!==false && cache.scan) ctx.drawImage(cache.scan, 0, 0, w, h);
@@ -423,7 +423,7 @@
     // damage / event flash
     if (opts.flash>0){ ctx.fillStyle="rgba("+(opts.flashCol||"180,40,40")+","+Math.min(0.6,opts.flash)+")"; ctx.fillRect(0,0,w,h); }
     // grain
-    if (cache.grain){ ctx.globalAlpha=0.35; ctx.drawImage(cache.grain,0,0,w,h); ctx.globalAlpha=1; }
+    if (cache.grain){ ctx.globalAlpha=0.13; ctx.drawImage(cache.grain,0,0,w,h); ctx.globalAlpha=1; }
   }
 
   function drawTitle(ctx, w, h, t) {
@@ -565,74 +565,50 @@
     var fov = o.fov || 1.25, focal = (bw * 0.5) / Math.tan(fov / 2);
     var range = o.headlightRange || 30, lightOn = o.lightOn;
 
-    // abyss: near-black, a touch of cold blue toward the centre
-    var bg = ctx.createRadialGradient(cx, cy, 2, cx, cy, bh * 0.9);
-    bg.addColorStop(0, lightOn ? "#0a1a22" : "#050a10"); bg.addColorStop(0.5, "#03070c"); bg.addColorStop(1, "#000000");
+    // clearer abyssal water — deep teal-blue, readable, not pitch black
+    var bg = ctx.createLinearGradient(0, 0, 0, bh);
+    bg.addColorStop(0, lightOn ? "#123843" : "#0c2632"); bg.addColorStop(0.55, "#072027"); bg.addColorStop(1, "#03121a");
     ctx.fillStyle = bg; ctx.fillRect(0, 0, bw, bh);
-
-    // headlight cone — a pale wedge of revealed water
+    // god-rays slanting from the surface
+    ctx.save(); ctx.globalAlpha = lightOn ? 0.12 : 0.07;
+    for (var gr = 0; gr < 4; gr++) { var rxp = bw * (0.18 + gr * 0.22) + Math.sin(t * 0.2 + gr) * bw * 0.03;
+      var rg = ctx.createLinearGradient(rxp, 0, rxp - bw * 0.12, bh); rg.addColorStop(0, "rgba(160,205,210,0.55)"); rg.addColorStop(1, "rgba(160,205,210,0)");
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.moveTo(rxp, 0); ctx.lineTo(rxp + bw * 0.05, 0); ctx.lineTo(rxp - bw * 0.09, bh); ctx.lineTo(rxp - bw * 0.16, bh); ctx.closePath(); ctx.fill(); }
+    ctx.restore();
+    // distance darkening
+    var vg = ctx.createRadialGradient(cx, cy * 0.92, bh * 0.08, cx, cy, bh * 0.95); vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(1,8,12,0.62)");
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, bw, bh);
+    // headlight cone
     if (lightOn) {
-      var lg = ctx.createRadialGradient(cx, cy - bh * 0.04, 2, cx, cy, bh * 0.7);
-      lg.addColorStop(0, "rgba(150,200,205,0.22)"); lg.addColorStop(0.5, "rgba(70,110,120,0.08)"); lg.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = lg; ctx.beginPath(); ctx.moveTo(cx, cy - bh * 0.04);
-      ctx.lineTo(cx - bw * 0.46, bh); ctx.lineTo(cx + bw * 0.46, bh); ctx.closePath(); ctx.fill();
+      var lg = ctx.createRadialGradient(cx, cy - bh * 0.05, 2, cx, cy, bh * 0.82);
+      lg.addColorStop(0, "rgba(175,220,225,0.30)"); lg.addColorStop(0.5, "rgba(95,135,145,0.10)"); lg.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = lg; ctx.beginPath(); ctx.moveTo(cx, cy - bh * 0.05); ctx.lineTo(cx - bw * 0.5, bh); ctx.lineTo(cx + bw * 0.5, bh); ctx.closePath(); ctx.fill();
     }
-
-    // streaming marine snow — the motion cue that sells 3D depth
+    // marine snow (motion cue)
     var snow = o.snow || [];
-    for (var i = 0; i < snow.length; i++) {
-      var p = snow[i]; if (p.rz <= 0.4) continue;
-      var sx = cx + (p.rx / p.rz) * focal, sy = cy + (p.ry / p.rz) * focal;
-      if (sx < -4 || sx > bw + 4 || sy < -4 || sy > bh + 4) continue;
-      var sz = Math.max(0.5, 2.4 / p.rz * 6);
-      var fog = Math.max(0, 1 - p.rz / (range * 1.4));
-      var a = (lightOn ? 0.5 : 0.16) * fog;
-      if (a <= 0.01) continue;
-      ctx.fillStyle = "rgba(180,205,200," + a.toFixed(3) + ")";
-      ctx.fillRect(sx, sy, sz, sz);
-    }
-
-    // contacts, far-to-near so near ones overlap far ones
+    for (var i = 0; i < snow.length; i++) { var p = snow[i]; if (p.rz <= 0.4) continue;
+      var sx = cx + (p.rx / p.rz) * focal, sy = cy + (p.ry / p.rz) * focal; if (sx < -4 || sx > bw + 4 || sy < -4 || sy > bh + 4) continue;
+      var sz = Math.max(0.5, 2.4 / p.rz * 6), fog = Math.max(0, 1 - p.rz / (range * 1.5)), a = (lightOn ? 0.55 : 0.24) * fog;
+      if (a <= 0.01) continue; ctx.fillStyle = "rgba(190,215,210," + a.toFixed(3) + ")"; ctx.fillRect(sx, sy, sz, sz); }
+    // contacts far->near
     var cs = (o.contacts || []).slice().sort(function (a, b) { return b.rz - a.rz; });
     for (var c = 0; c < cs.length; c++) {
       var k = cs[c]; if (k.rz <= 0.6) continue;
-      var x = cx + (k.rx / k.rz) * focal, y = cy + (k.ry / k.rz) * focal;
-      if (x < -bw * 0.3 || x > bw * 1.3) continue;
-      var fog2 = Math.max(0, 1 - k.rz / range);
-      var sz2 = Math.min(bh * 0.7, (focal * 1.6) / k.rz);
+      var x = cx + (k.rx / k.rz) * focal, y = cy + (k.ry / k.rz) * focal; if (x < -bw * 0.4 || x > bw * 1.4) continue;
+      var fog2 = Math.max(0, 1 - k.rz / range), sz2 = Math.min(bh * 0.8, (focal * 1.7) / k.rz);
       if (k.isMonster) {
-        // a darker-than-dark silhouette with glinting eyes; close + lit = full reveal
-        var seen = lightOn ? fog2 : (k.rz < 12 ? (12 - k.rz) / 12 * 0.5 : 0);
-        if (k.rz < 9 && lightOn) { drawPortrait(ctx, x, y, sz2 * 0.5, { category: "creature", name: k.monShape === "leviathan" ? "THE LEVIATHAN" : k.monShape, id: 7, _shape: k.monShape }, t); }
-        else if (seen > 0.02) {
-          ctx.save(); ctx.globalAlpha = Math.min(1, seen + 0.15);
-          ctx.fillStyle = "#01030500"; var bShape = ctx.createRadialGradient(x, y, 0, x, y, sz2 * 0.55);
-          bShape.addColorStop(0, "rgba(6,10,14," + Math.min(0.9, seen + 0.3).toFixed(2) + ")"); bShape.addColorStop(1, "rgba(0,0,0,0)");
-          ctx.fillStyle = bShape; ctx.beginPath(); ctx.ellipse(x, y, sz2 * 0.5, sz2 * 0.62, 0, 0, 7); ctx.fill();
-          // eyes
-          var eg = k.monShape === "leviathan" ? PAL.bloodHi : PAL.bio, es = Math.max(1.5, sz2 * 0.05);
-          var blink = 0.6 + 0.4 * Math.sin(t * 3 + k.rz);
-          ctx.globalAlpha = Math.min(1, (seen + 0.25)) * blink;
-          glowDot(ctx, x - sz2 * 0.13, y - sz2 * 0.05, es * 2.2, eg, 1); glowDot(ctx, x + sz2 * 0.13, y - sz2 * 0.05, es * 2.2, eg, 1);
-          ctx.fillStyle = eg; ctx.beginPath(); ctx.arc(x - sz2 * 0.13, y - sz2 * 0.05, es, 0, 7); ctx.arc(x + sz2 * 0.13, y - sz2 * 0.05, es, 0, 7); ctx.fill();
-          ctx.restore();
-        }
+        var seen = lightOn ? Math.max(fog2, 0.4) : (k.rz < 14 ? (14 - k.rz) / 14 * 0.7 : 0.05);
+        drawAngler3D(ctx, x, y, sz2 * 0.55, { yaw: Math.sin(t * 0.7 + k.rz) * 0.45, pitch: -0.12 + Math.sin(t * 0.5) * 0.08, mouth: 0.18 + 0.12 * Math.sin(t * 1.5), t: t, lit: seen, boss: k.monShape === "leviathan" });
       } else {
-        // loot/vent/source — a faint glow always hints; the light resolves the glyph
-        var glowSeen = lightOn ? fog2 : (k.rz < 22 ? Math.max(0, (22 - k.rz) / 22) * 0.35 : 0);
-        if (glowSeen <= 0.02) continue;
+        var glowSeen = lightOn ? fog2 : (k.rz < 22 ? Math.max(0, (22 - k.rz) / 22) * 0.4 : 0); if (glowSeen <= 0.02) continue;
         var col = k.kind === "vent" ? PAL.phos : k.kind === "source" ? PAL.violetHi : k.kind === "artifact" ? PAL.bio : PAL.bioHi;
-        ctx.save(); ctx.globalAlpha = Math.min(1, glowSeen + 0.1); glowDot(ctx, x, y, Math.max(4, sz2 * 0.22), col, 1); ctx.restore();
-        if ((lightOn && fog2 > 0.05) || k.kind === "source") {
-          ctx.save(); ctx.globalAlpha = Math.min(1, (k.kind === "source" ? 0.8 : fog2) + 0.1);
-          lootGlyph(ctx, x, y, Math.min(bh * 0.3, sz2 * 0.32), k.kind === "source" ? "shard" : k.kind === "vent" ? "vent" : k.kind === "artifact" ? "artifact" : "data", t);
-          ctx.restore();
-        }
+        ctx.save(); ctx.globalAlpha = Math.min(1, glowSeen + 0.12); glowDot(ctx, x, y, Math.max(4, sz2 * 0.22), col, 1); ctx.restore();
+        if ((lightOn && fog2 > 0.05) || k.kind === "source") { ctx.save(); ctx.globalAlpha = Math.min(1, (k.kind === "source" ? 0.85 : fog2) + 0.12);
+          lootGlyph(ctx, x, y, Math.min(bh * 0.3, sz2 * 0.32), k.kind === "source" ? "shard" : k.kind === "vent" ? "vent" : k.kind === "artifact" ? "artifact" : "data", t); ctx.restore(); }
       }
     }
-
-    // forward reticle (heading)
-    ctx.strokeStyle = "rgba(120,255,210,0.18)"; ctx.lineWidth = 1;
+    // forward reticle
+    ctx.strokeStyle = "rgba(120,255,210,0.16)"; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(cx - 8, cy); ctx.lineTo(cx + 8, cy); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy + 8); ctx.stroke();
   }
 
@@ -751,6 +727,76 @@
     ctx.restore();
   }
 
+  // ---------- real 3D Angler (software mesh renderer: perspective + painter's algorithm + flat shading) ----------
+  function v3norm(a) { var m = Math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) || 1; return [a[0] / m, a[1] / m, a[2] / m]; }
+  function v3sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+  function v3cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function rot3(v, yaw, pitch) {
+    var cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+    var x = v[0] * cy + v[2] * sy, z = -v[0] * sy + v[2] * cy, y = v[1];
+    return [x, y * cp - z * sp, y * sp + z * cp];
+  }
+  var _angler = null;
+  function anglerMesh() {
+    if (_angler) return _angler;
+    var nz = 9, ns = 12, rings = [];
+    for (var i = 0; i < nz; i++) {
+      var u = i / (nz - 1), z = -1.3 + u * 2.05;
+      var r = 0.1 + 0.82 * Math.pow(Math.sin(Math.min(1, u * 0.92) * Math.PI), 0.62);
+      var ring = []; for (var j = 0; j < ns; j++) { var a = j / ns * Math.PI * 2; ring.push([Math.cos(a) * r, Math.sin(a) * r * 0.82 - r * 0.06, z]); }
+      rings.push(ring);
+    }
+    var faces = [];
+    for (var i2 = 0; i2 < nz - 1; i2++) for (var j2 = 0; j2 < ns; j2++) { var jb = (j2 + 1) % ns; faces.push([rings[i2][j2], rings[i2][jb], rings[i2 + 1][jb], rings[i2 + 1][j2]]); }
+    _angler = { faces: faces, headZ: 0.75, headR: rings[nz - 1][0] ? 0.12 : 0.12 };
+    return _angler;
+  }
+  // o: { yaw, pitch, mouth(0..1), t, lit(0..1) }
+  function drawAngler3D(ctx, cx, cy, size, o) {
+    o = o || {}; var yaw = o.yaw || 0, pitch = o.pitch || 0, mouth = o.mouth == null ? 0.25 : o.mouth, t = o.t || 0, lit = o.lit == null ? 1 : o.lit, camZ = 3.05;
+    var M = anglerMesh(), light = v3norm([0.4, 0.5, -0.85]);
+    function tp(v) { var r = rot3(v, yaw, pitch); var z = r[2] + camZ; if (z < 0.25) z = 0.25; var f = size / z; return [cx + r[0] * f, cy - r[1] * f, z, r]; }
+    var BODY = [44, 78, 86], DARK = [8, 18, 22];
+    var drawn = [];
+    for (var i = 0; i < M.faces.length; i++) { var f = M.faces[i]; var p = [tp(f[0]), tp(f[1]), tp(f[2]), tp(f[3])];
+      var n = v3norm(v3cross(v3sub(p[1][3], p[0][3]), v3sub(p[2][3], p[0][3])));
+      var sh = Math.max(0.12, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]);
+      drawn.push({ p: p, z: (p[0][2] + p[1][2] + p[2][2] + p[3][2]) / 4, sh: sh }); }
+    drawn.sort(function (a, b) { return b.z - a.z; });
+    for (var d2 = 0; d2 < drawn.length; d2++) { var dn = drawn[d2], k = (0.35 + dn.sh * 0.65) * (0.5 + lit * 0.5);
+      ctx.fillStyle = "rgb(" + Math.round(DARK[0] + (BODY[0] - DARK[0]) * k) + "," + Math.round(DARK[1] + (BODY[1] - DARK[1]) * k) + "," + Math.round(DARK[2] + (BODY[2] - DARK[2]) * k) + ")";
+      ctx.beginPath(); ctx.moveTo(dn.p[0][0], dn.p[0][1]); for (var q = 1; q < 4; q++) ctx.lineTo(dn.p[q][0], dn.p[q][1]); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.22)"; ctx.lineWidth = 1; ctx.stroke(); }
+    // ---- gaping maw at the head front ----
+    var head = tp([0, -0.02, M.headZ]), rim = tp([0, 0.5, M.headZ]);
+    var R = Math.max(4, Math.abs(head[1] - rim[1]) * 1.05);
+    var open = R * (0.32 + mouth * 1.5);
+    ctx.save(); ctx.translate(head[0], head[1]);
+    var mg = ctx.createRadialGradient(0, 0, 1, 0, 0, R * 1.2); mg.addColorStop(0, "#150305"); mg.addColorStop(0.7, "#0a0204"); mg.addColorStop(1, "rgba(10,2,4,0)");
+    ctx.fillStyle = mg; ctx.beginPath(); ctx.ellipse(0, 0, R * 0.95, open, 0, 0, 7); ctx.fill();
+    // red throat glow
+    ctx.fillStyle = "rgba(150,20,25," + (0.25 + mouth * 0.35).toFixed(2) + ")"; ctx.beginPath(); ctx.ellipse(0, 0, R * 0.5, open * 0.55, 0, 0, 7); ctx.fill();
+    // teeth — needles top & bottom rim
+    var teeth = 9, tl = R * (0.22 + mouth * 0.18);
+    ctx.fillStyle = "#d9d2bf";
+    for (var tnum = 0; tnum < teeth; tnum++) { var fx = (tnum / (teeth - 1) - 0.5) * 1.7 * R;
+      poly(ctx, [[fx - R * 0.06, -open], [fx + R * 0.06, -open], [fx, -open + tl]], "#d9d2bf");        // upper
+      poly(ctx, [[fx - R * 0.06, open], [fx + R * 0.06, open], [fx, open - tl]], "#cfc7b2");            // lower
+    }
+    ctx.restore();
+    // ---- eyes (glow) ----
+    var e1 = tp([-0.28, 0.24, 0.5]), e2 = tp([0.28, 0.24, 0.5]), er = Math.max(2, R * 0.12);
+    var eg = o.boss ? PAL.bloodHi : PAL.bio;
+    glowDot(ctx, e1[0], e1[1], er * 2.4, eg, 0.9 * lit + 0.1); glowDot(ctx, e2[0], e2[1], er * 2.4, eg, 0.9 * lit + 0.1);
+    ctx.fillStyle = eg; ctx.beginPath(); ctx.arc(e1[0], e1[1], er, 0, 7); ctx.arc(e2[0], e2[1], er, 0, 7); ctx.fill();
+    ctx.fillStyle = "#040608"; ctx.beginPath(); ctx.arc(e1[0], e1[1], er * 0.45, 0, 7); ctx.arc(e2[0], e2[1], er * 0.45, 0, 7); ctx.fill();
+    // ---- lure: stalk from the brow with a glowing bulb ----
+    var brow = tp([0, 0.5, 0.45]), tip = tp([0, 1.05 + Math.sin(t * 2) * 0.06, 0.9]);
+    ctx.strokeStyle = "#1c2a30"; ctx.lineWidth = Math.max(1.5, R * 0.06); ctx.beginPath(); ctx.moveTo(brow[0], brow[1]); ctx.quadraticCurveTo(brow[0] + (tip[0] - brow[0]) * 0.4, brow[1] - R * 0.6, tip[0], tip[1]); ctx.stroke();
+    var lb = Math.max(2.5, R * 0.18); glowDot(ctx, tip[0], tip[1], lb * 2.6, PAL.bioHi, 0.7 + 0.3 * Math.sin(t * 5));
+    ctx.fillStyle = PAL.bioHi; ctx.beginPath(); ctx.arc(tip[0], tip[1], lb, 0, 7); ctx.fill();
+  }
+
   // ---------- cute cabin plushies (morale decor) ----------
   function drawPlushie(ctx, x, y, s, id, col, t) {
     t = t || 0; col = col || PAL.amber; ctx.save(); ctx.translate(x, y + Math.sin(t * 1.5 + x) * s * 0.04);
@@ -825,6 +871,6 @@
     text: text, wrapText: wrapText, rrect: rrect, drawTitle: drawTitle, catColor: catColor, mix: mix,
     drawGrid: drawGrid, drawCell: drawCell, lootGlyph: lootGlyph, numColor: numColor, glowDot: glowDot, textCentered: textCentered,
     drawForward: drawForward, drawOxygenTank: drawOxygenTank, drawDepthGauge: drawDepthGauge, drawWarnLamp: drawWarnLamp, drawLeak: drawLeak,
-    drawPlushie: drawPlushie, drawRig: drawRig,
+    drawPlushie: drawPlushie, drawRig: drawRig, drawAngler3D: drawAngler3D,
   };
 })(typeof window !== "undefined" ? window : this);
