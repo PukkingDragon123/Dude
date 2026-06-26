@@ -400,8 +400,9 @@
     var pb = L.btn.ping; for (var i = 0; i < effPings(); i++) { var on = i < G.pings; var dx = pb.x + 8 + i * 12, dy = pb.y - 8; ctx.beginPath(); ctx.arc(dx, dy, 3.5, 0, 7); ctx.fillStyle = on ? PAL.bioHi : "#13201a"; ctx.fill(); ctx.strokeStyle = PAL.phosLo; ctx.lineWidth = 1; ctx.stroke(); }
     Art.button(ctx, pb, "PING", { primary: G.pingFlash > 0.4, hover: UI.hover === "ping", disabled: G.pings <= 0 });
     Art.button(ctx, L.btn.light, "LIGHT" + (G.lightOn ? " •" : ""), { primary: G.lightOn, hover: UI.hover === "light" });
-    Art.button(ctx, L.btn.excavate, "EXCAVATE", { primary: G.onLoot, hover: UI.hover === "excavate", disabled: !G.onLoot });
-    Art.button(ctx, L.btn.patch, "PATCH " + G.patches, { hover: UI.hover === "patch", disabled: G.patches <= 0 || G.hull >= effMaxHull() });
+    var narrow = L.btn.excavate.w < 88;
+    Art.button(ctx, L.btn.excavate, narrow ? "DIG" : "EXCAVATE", { primary: G.onLoot, hover: UI.hover === "excavate", disabled: !G.onLoot });
+    Art.button(ctx, L.btn.patch, (narrow ? "FIX " : "PATCH ") + G.patches, { hover: UI.hover === "patch", disabled: G.patches <= 0 || G.hull >= effMaxHull() });
     var oc = curCell(); var cl = (oc && oc.source) ? "BREACH" : (oc && oc.hatch) ? "DIVE ▼" : "RISE ▲";
     Art.button(ctx, L.btn.crank, cl, { primary: !!(oc && (oc.hatch || oc.source)), hover: UI.hover === "crank" });
     Art.button(ctx, L.btn.brief, "?", { hover: UI.hover === "brief" });
