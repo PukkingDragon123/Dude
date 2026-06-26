@@ -140,7 +140,7 @@
   // THE TWIST: the Angler moves. It slips to an adjacent FOG cell, clearing the flag you set on its
   // old tile (your mark is now a lie) and re-arming an unmarked one. Numbers shift; a solved board lies.
   function moveAnglers() {
-    var chance = (G.threat >= CFG.wake ? 0.5 : 0.16) + (G.layer - 1) * 0.05;
+    var chance = Math.min(0.5, (G.threat >= CFG.wake ? 0.4 : 0.1) + (G.layer - 1) * 0.04);
     var moved = false, dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
     for (var i = 0; i < G.cells.length; i++) {
       var c = G.cells[i]; if (!c.mon || c.triggered) continue; if (!G.rng.chance(chance)) continue;
@@ -294,18 +294,21 @@
     Art.drawForward(bctx, bw, bh, { contacts: forwardContacts(), snow: G.snow, lightOn: G.lightOn, threat: G.threat / 100, time: G.time, fov: 1.2, headlightRange: lightRange() });
   }
   function forwardContacts() {
-    var out = [], sp = 6.5, tp = G.transit ? G.transit.t : 0;
+    var out = [], mons = [], sp = 6.5, tp = G.transit ? G.transit.t : 0;
     for (var d = 1; d <= 4; d++) {
       var rz = Math.max(0.8, d * sp - tp * sp * 0.92);
       for (var lat = -1; lat <= 1; lat++) {
         if (lat !== 0 && d < 2) continue; // straight ahead near; widen the cone with distance
         var tx = G.sub.cx + G.facing.dx * d - G.facing.dy * lat, ty = G.sub.cy + G.facing.dy * d + G.facing.dx * lat; var c = cell(tx, ty); if (!c) continue;
         var rx = lat * 3.2;
-        if (c.mon && !c.triggered) out.push({ rx: rx, ry: 0.05, rz: rz, isMonster: true, monShape: MON[c.monId].shape }); // Anglers loom in the water (dim unless lit)
+        if (c.mon && !c.triggered) mons.push({ rx: rx, ry: 0.05, rz: rz, isMonster: true, monShape: MON[c.monId].shape });
         else if (lat === 0 && c.hatch) out.push({ rx: 0, ry: 0, rz: rz, kind: c.source ? "source" : "vent", isMonster: false });
         else if (c.seen && c.lootId && !c.collected) out.push({ rx: rx, ry: 0, rz: rz, kind: c.kind, isMonster: false });
       }
     }
+    // cap full 3D Anglers to the nearest 2 (perf); the rest are implied by the radar/numbers
+    mons.sort(function (a, b) { return a.rz - b.rz; });
+    for (var m = 0; m < Math.min(2, mons.length); m++) out.push(mons[m]);
     if (G.transit && G.transit.isMonster) out.push({ rx: 0, ry: 0.05, rz: Math.max(0.8, 6.5 - G.transit.t * 5.8), isMonster: true, monShape: G.transit.shape });
     return out;
   }
