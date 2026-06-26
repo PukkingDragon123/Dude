@@ -8,8 +8,8 @@
 
   var CFG = {
     startHull: 100, maxHull: 100,
-    startOxygen: 220,        // seconds of air (the dread clock)
-    idleDrain: 0.55,         // air lost per second while thinking
+    startOxygen: 210,        // seconds of air (the dread clock) — tighter
+    idleDrain: 0.65,         // air lost per second while thinking — harsher
     moveCost: 4,             // air spent per completed drive into a new cell
     ventRefill: 34,          // air refunded by a thermal vent cell
     moveGlide: 0.34,         // seconds the sub glides between cells (the "transit" + scare window)
@@ -50,9 +50,9 @@
     { gw: 7,  gh: 7,  monsters: 6,  loot: 7, vents: 3, depth: 240,  pool: ["angler", "angler", "hagfish"], lootPool: ["data", "data", "data", "artifact"] },
     { gw: 8,  gh: 8,  monsters: 10, loot: 8, vents: 3, depth: 640,  pool: ["angler", "hagfish", "swimmer"], lootPool: ["data", "data", "artifact"] },
     { gw: 8,  gh: 8,  monsters: 13, loot: 8, vents: 3, depth: 1200, pool: ["swimmer", "squid", "angler"],   lootPool: ["data", "artifact", "relic"] },
-    { gw: 9,  gh: 9,  monsters: 17, loot: 9, vents: 4, depth: 2100, pool: ["swimmer", "squid", "squid"],    lootPool: ["artifact", "relic", "data"] },
-    { gw: 9,  gh: 9,  monsters: 20, loot: 9, vents: 4, depth: 3400, pool: ["squid", "swimmer", "bonewhale"],lootPool: ["relic", "artifact"] },
-    { gw: 9,  gh: 10, monsters: 18, loot: 8, vents: 5, depth: 5200, pool: ["squid", "bonewhale", "leviathan"], lootPool: ["relic", "artifact"], source: true },
+    { gw: 9,  gh: 9,  monsters: 19, loot: 9, vents: 4, depth: 2100, pool: ["swimmer", "squid", "squid", "bonewhale"], lootPool: ["artifact", "relic", "data"] },
+    { gw: 9,  gh: 9,  monsters: 22, loot: 9, vents: 4, depth: 3400, pool: ["squid", "bonewhale", "bonewhale", "bloop"], lootPool: ["relic", "artifact"] },
+    { gw: 9,  gh: 10, monsters: 20, loot: 8, vents: 5, depth: 5200, pool: ["bonewhale", "bloop", "bloop"], lootPool: ["relic", "artifact"], source: true },
   ];
 
   // ---- monsters (the mines). single-cell so the deduction + safe-path guarantee stay clean;
@@ -63,16 +63,17 @@
     swimmer:   { name: "Pale Swimmer",   tier: 2, shape: "swimmer",   dmg: [16, 24] },
     squid:     { name: "Colossal Squid", tier: 2, shape: "squid",     dmg: [22, 32] },
     bonewhale: { name: "Bonewhale",      tier: 3, shape: "whale",     dmg: [26, 38] },
-    leviathan: { name: "THE LEVIATHAN",  tier: 4, shape: "leviathan", dmg: [40, 60] },
+    bloop:     { name: "THE BLOOP",      tier: 4, shape: "bloop",     dmg: [50, 82] }, // colossal; the deep horror
   };
 
   // ---- loot / cell contents (safe; NOT counted in numbers). ----
+  // SIGNALS you intercept (secured via the radar mini-game). `need` = locks required.
   var LOOT = {
-    data:     { name: "Data Cache",    kind: "data",     value: [12, 26],   shape: "data" },
-    artifact: { name: "Resonant Idol", kind: "artifact", value: [70, 150],  shape: "artifact" },
-    relic:    { name: "Glyph Pillar",  kind: "artifact", value: [180, 360], shape: "artifact" },
-    vent:     { name: "Thermal Vent",  kind: "vent",     o2: 34,            shape: "vent" },
-    source:   { name: "THE SOURCE",    kind: "source",   value: [0, 0],     shape: "anomaly" },
+    data:     { name: "Faint Signal",     kind: "signal", value: [14, 30],   shape: "signal", need: 2 },
+    artifact: { name: "Encrypted Signal", kind: "signal", value: [80, 170],  shape: "signal", need: 3 },
+    relic:    { name: "Distress Beacon",  kind: "signal", value: [200, 400], shape: "signal", need: 4 },
+    vent:     { name: "Thermal Vent",     kind: "vent",   o2: 34,            shape: "vent" },
+    source:   { name: "THE SOURCE",       kind: "source", value: [0, 0],     shape: "anomaly" },
   };
 
   var LORE = [

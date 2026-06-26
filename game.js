@@ -167,7 +167,7 @@
 
   // ---------------- actions ----------------
   function tryDrive(dx, dy) {
-    if (G.scene !== "dive" || G.transit || G.scare) return; Audio.init();
+    if (G.scene !== "dive" || G.transit || G.scare || G.lock) return; Audio.init();
     var tx = G.sub.cx + dx, ty = G.sub.cy + dy, c = cell(tx, ty); if (!c) return;
     G.facing = { dx: dx, dy: dy };
     if (c.flagged && !c.triggered) {
@@ -191,20 +191,32 @@
     if (G.oxygen <= 0) { G.oxygen = 0; return die("oxygen"); }
     if (G.hull <= 0) return die("hull");
   }
-  function collect(c) {
+  function collect(c) { // c is a vent (auto) or a secured signal
     c.collected = true;
     if (c.kind === "vent") { G.oxygen = clamp(G.oxygen + c.o2, 0, effMaxOxygen() + 40); G.lamp.o2 = 0; Audio.vent(); G.flash = 0.2; G.flashCol = "40,240,170"; }
-    else if (c.kind === "artifact") { G.haul += c.value; Audio.good(); G.flash = 0.25; G.flashCol = "70,240,200"; }
-    else { G.haul += c.value; Audio.scan(); }
+    else { G.haul += c.value; Audio.good(); G.flash = 0.28; G.flashCol = "224,163,46"; }
   }
-  function excavate() { // haul the data/artifact on the current cell (a deliberate, slightly loud dig)
-    if (G.scene !== "dive" || G.transit || G.scare) return; var c = curCell();
+  // SECURE: start the radar mini-game to lock a signal that a warship is jamming
+  function secure() {
+    if (G.scene !== "dive" || G.transit || G.scare || G.lock) return; var c = curCell();
     if (!c || !c.lootId || c.collected || c.kind === "vent") return;
-    collect(c); G.onLoot = false; G.oxygen -= 2; G.threat = clamp(G.threat + 6, 0, 100);
-    if (G.threat >= CFG.wake) moveAnglers();
+    var def = LOOT[c.lootId];
+    G.lock = { cx: c.x, cy: c.y, val: c.value, need: def.need || 2, hits: 0, ang: G.rng.range(0, Math.PI * 2), spd: 1.7 + (def.need || 2) * 0.32, dir: G.rng.chance(0.5) ? 1 : -1, until: G.time + 9.5 };
+    Audio.scan();
   }
+  function angDiff(a, b) { var d = (a - b) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; }
+  function lockAttempt() { // press when the drifting signal crosses the capture window at the top of the dial
+    if (!G.lock) return; var lk = G.lock;
+    var diff = Math.abs(angDiff(lk.ang, -Math.PI / 2));
+    var w = Math.max(0.22, 0.55 - lk.hits * 0.05); // capture window shrinks as you close in
+    if (diff <= w) { lk.hits++; lk.spd += 0.55; if (G.rng.chance(0.5)) lk.dir *= -1; Audio.ping(); G.flash = 0.12; G.flashCol = "70,240,200";
+      if (lk.hits >= lk.need) lockSuccess(); }
+    else { lk.spd += 0.22; G.threat = clamp(G.threat + 5, 0, 100); Audio.alert(); }
+  }
+  function lockSuccess() { var c = cell(G.lock.cx, G.lock.cy); if (c) collect(c); G.haul += 0; G.onLoot = false; G.threat = clamp(G.threat + 8, 0, 100); G.lock = null; }
+  function lockFail() { G.lock = null; G.threat = clamp(G.threat + 22, 0, 100); G.lamp.wake = 1; Audio.alert(); moveAnglers(); }
   function patch() { // hands-on leak repair
-    if (G.scene !== "dive" || G.transit) return;
+    if (G.scene !== "dive" || G.transit || G.lock || G.scare) return;
     if (G.patches <= 0) { G.lamp.hull = 0.4; return; }
     if (G.hull >= effMaxHull()) return;
     G.patches--; G.hull = clamp(G.hull + CFG.patchAmount, 0, effMaxHull());
@@ -213,6 +225,7 @@
   }
   function crank() { // the winch: descend on the hatch, breach on the Source, otherwise reel UP to the rig
     if (G.scene !== "dive" || G.transit || G.scare) return; var c = curCell();
+    if (G.lock) return;
     if (c && c.source) { winRun(); return; }
     if (c && c.hatch) { descend(); return; }
     surface();
@@ -227,7 +240,7 @@
     Audio.setMusic("threat");
   }
   function ping() {
-    if (G.scene !== "dive" || G.transit || G.scare || G.pings <= 0) { if (G.pings <= 0) G.lamp.o2 = 0.4; return; }
+    if (G.scene !== "dive" || G.transit || G.scare || G.lock || G.pings <= 0) { if (G.pings <= 0) G.lamp.o2 = 0.4; return; }
     Audio.init(); G.pings--; G.pingFlash = 1; G.sweep = 0; G.threat = clamp(G.threat + CFG.threatPing, 0, 100);
     var fx = G.facing.dx, fy = G.facing.dy;
     for (var d = 1; d <= CFG.pingCone; d++) { for (var l = -(d - 1); l <= d - 1; l++) {
@@ -237,8 +250,8 @@
     Audio.ping();
     if (G.threat >= CFG.wake) moveAnglers(); // a loud ping makes the Anglers shift
   }
-  function toggleLight() { if (G.scene !== "dive") return; Audio.init(); G.lightOn = !G.lightOn; Audio.vent(); }
-  function flagFaced() { if (G.scene !== "dive" || G.transit) return; var c = cell(G.sub.cx + G.facing.dx, G.sub.cy + G.facing.dy); flagCell(c); }
+  function toggleLight() { if (G.scene !== "dive" || G.lock) return; Audio.init(); G.lightOn = !G.lightOn; Audio.vent(); }
+  function flagFaced() { if (G.scene !== "dive" || G.transit || G.lock) return; var c = cell(G.sub.cx + G.facing.dx, G.sub.cy + G.facing.dy); flagCell(c); }
   function flagCell(c) { if (!c || c.seen) return; c.flagged = !c.flagged; G.confirmDir = null; Audio.card(); }
 
   // (the old "stalker" hunter is replaced by moveAnglers(): the mines themselves relocate.)
@@ -258,6 +271,13 @@
     if (G.scene !== "dive") return;
 
     if (G.transit) { G.transit.t += s / CFG.moveGlide; if (G.transit.t >= 1) resolveArrive(G.transit); }
+
+    if (G.lock) { var lk = G.lock; lk.ang = (lk.ang + lk.spd * lk.dir * s) % (Math.PI * 2);
+      G.oxygen -= CFG.idleDrain * s * 1.6; G.threat = clamp(G.threat + 4 * s, 0, 100); // broadcasting burns air + screams into the dark
+      if (G.time > lk.until) lockFail();
+      if (G.oxygen <= 0) { G.oxygen = 0; G.lock = null; return die("oxygen"); }
+      return; // the lock has focus — pause the normal dive sim
+    }
 
     // air clock
     G.oxygen -= CFG.idleDrain * s; if (G.oxygen <= 0) { G.oxygen = 0; return die("oxygen"); }
@@ -324,6 +344,7 @@
     drawCabinPlushies();
     // monitor grid
     drawMonitor();
+    if (G.lock) drawLock();
     // instruments
     Art.drawOxygenTank(ctx, L.tank.x, L.tank.y, L.tank.w, L.tank.h, G.oxygen / CFG.startOxygen, G.time);
     Art.drawDepthGauge(ctx, L.depth.cx, L.depth.cy, L.depth.r, clamp(G.layer / CFG.layers, 0, 1), G.time);
@@ -406,7 +427,7 @@
     Art.button(ctx, pb, "PING", { primary: G.pingFlash > 0.4, hover: UI.hover === "ping", disabled: G.pings <= 0 });
     Art.button(ctx, L.btn.light, "LIGHT" + (G.lightOn ? " •" : ""), { primary: G.lightOn, hover: UI.hover === "light" });
     var narrow = L.btn.excavate.w < 88;
-    Art.button(ctx, L.btn.excavate, narrow ? "DIG" : "EXCAVATE", { primary: G.onLoot, hover: UI.hover === "excavate", disabled: !G.onLoot });
+    Art.button(ctx, L.btn.excavate, G.lock ? "LOCK!" : (narrow ? "SIG" : "SECURE"), { primary: G.lock || G.onLoot, hover: UI.hover === "excavate", disabled: !G.lock && !G.onLoot });
     Art.button(ctx, L.btn.patch, (narrow ? "FIX " : "PATCH ") + G.patches, { hover: UI.hover === "patch", disabled: G.patches <= 0 || G.hull >= effMaxHull() });
     var oc = curCell(); var cl = (oc && oc.source) ? "BREACH" : (oc && oc.hatch) ? "DIVE ▼" : "RISE ▲";
     Art.button(ctx, L.btn.crank, cl, { primary: !!(oc && (oc.hatch || oc.source)), hover: UI.hover === "crank" });
@@ -416,12 +437,31 @@
     Art.button(ctx, d.left, "◄", { hover: UI.hover === "left" }); Art.button(ctx, d.right, "►", { hover: UI.hover === "right" });
   }
 
+  function drawLock() { // radar mini-game: catch the warship-jammed signal in the capture window
+    var m = L.monitor, lk = G.lock, cx = m.x + m.w / 2, cy = m.y + m.h / 2, R = Math.min(m.w, m.h) * 0.32;
+    ctx.save(); ctx.beginPath(); Art.rrect(ctx, m.x, m.y, m.w, m.h, 6); ctx.clip();
+    ctx.fillStyle = "rgba(2,9,7,0.85)"; ctx.fillRect(m.x, m.y, m.w, m.h);
+    ctx.strokeStyle = PAL.phosDim; ctx.lineWidth = 1; for (var ring = 1; ring <= 3; ring++) { ctx.beginPath(); ctx.arc(cx, cy, R * ring / 3, 0, 7); ctx.stroke(); }
+    var w = Math.max(0.22, 0.55 - lk.hits * 0.05);
+    ctx.fillStyle = "rgba(120,255,210,0.18)"; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, -Math.PI / 2 - w, -Math.PI / 2 + w); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = PAL.phosHi; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, R, -Math.PI / 2 - w, -Math.PI / 2 + w); ctx.stroke();
+    ctx.strokeStyle = "rgba(224,163,46,0.4)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy, R, lk.ang - lk.dir * 0.7, lk.ang); ctx.stroke();
+    var bx = cx + Math.cos(lk.ang) * R, by = cy + Math.sin(lk.ang) * R;
+    Art.glowDot(ctx, bx, by, R * 0.18, PAL.amberHi, 1); ctx.fillStyle = PAL.amberHi; ctx.beginPath(); ctx.arc(bx, by, Math.max(3, R * 0.08), 0, 7); ctx.fill();
+    for (var h = 0; h < lk.need; h++) { var px = cx - (lk.need - 1) * 8 + h * 16, py = cy + R * 0.55; ctx.beginPath(); ctx.arc(px, py, 5, 0, 7); ctx.fillStyle = h < lk.hits ? PAL.bioHi : "#1a2a22"; ctx.fill(); ctx.strokeStyle = PAL.phosLo; ctx.lineWidth = 1; ctx.stroke(); }
+    var tleft = clamp((lk.until - G.time) / 9.5, 0, 1);
+    ctx.strokeStyle = tleft < 0.3 ? PAL.bloodHi : PAL.bio; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, cy, R + 9, -Math.PI / 2, -Math.PI / 2 + tleft * Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
   function drawScare() { // full-screen takeover: the Angler rushes the glass and fills your view
     var sc = G.scare, dur = Math.max(0.3, sc.until - sc.t0), k = clamp((G.time - sc.t0) / dur, 0, 1), lung = k * k;
     ctx.fillStyle = "#04080c"; ctx.fillRect(0, 0, W, H);
-    var sz = Math.max(W, H) * (0.34 + lung * 0.95);
-    var jx = (Math.random() - 0.5) * 22 * (1 - k * 0.35), jy = (Math.random() - 0.5) * 22 * (1 - k * 0.35);
-    Art.drawAngler3D(ctx, W / 2 + jx, H * 0.47 + jy, sz, { yaw: Math.sin(G.time * 26) * 0.14, pitch: -0.03, mouth: clamp(0.3 + lung * 1.05, 0, 1), t: G.time, lit: 1, boss: sc.tier >= 3 });
+    var bloop = sc.shape === "bloop";
+    var sz = Math.max(W, H) * ((bloop ? 0.46 : 0.34) + lung * (bloop ? 1.25 : 0.95));
+    var jx = (Math.random() - 0.5) * (bloop ? 30 : 22) * (1 - k * 0.3), jy = (Math.random() - 0.5) * (bloop ? 30 : 22) * (1 - k * 0.3);
+    if (bloop) Art.drawBloop3D(ctx, W / 2 + jx, H * 0.47 + jy, sz, { yaw: Math.sin(G.time * 18) * 0.12, pitch: -0.02, mouth: clamp(0.35 + lung * 1.0, 0, 1), t: G.time, lit: 1 });
+    else Art.drawAngler3D(ctx, W / 2 + jx, H * 0.47 + jy, sz, { yaw: Math.sin(G.time * 26) * 0.14, pitch: -0.03, mouth: clamp(0.3 + lung * 1.05, 0, 1), t: G.time, lit: 1, boss: sc.tier >= 3 });
     if (k < 0.18) { ctx.fillStyle = "rgba(240,245,245," + (0.7 * (1 - k / 0.18)).toFixed(2) + ")"; ctx.fillRect(0, 0, W, H); }
     ctx.fillStyle = "rgba(150,18,22," + (0.3 * (1 - k)).toFixed(2) + ")"; ctx.fillRect(0, 0, W, H);
   }
@@ -536,9 +576,10 @@
     for (var m = 0; m < UI.menu.length; m++) if (inside(UI.menu[m].r, p)) { var act = UI.menu[m].act; Audio.card(); if (act === "dive") G.scene = "rig"; else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; return; }
   }
   function onDiveDown(p) {
+    if (G.lock) { lockAttempt(); return; } // mini-game has focus: any tap fires a lock
     if (inside(L.btn.ping, p)) { ping(); return; }
     if (inside(L.btn.light, p)) { toggleLight(); return; }
-    if (inside(L.btn.excavate, p)) { excavate(); return; }
+    if (inside(L.btn.excavate, p)) { secure(); return; }
     if (inside(L.btn.patch, p)) { patch(); return; }
     if (inside(L.btn.crank, p)) { crank(); return; }
     if (inside(L.btn.brief, p)) { UI.overlay = "help"; return; }
@@ -571,6 +612,7 @@
     if (UI.overlay) { if (code === "Escape" || code === "Enter" || code === "Space" || code === "KeyH") { UI.overlay = null; e.preventDefault(); } return; }
     if (code === "KeyH") { UI.overlay = "help"; e.preventDefault(); return; }
     if (G.scene === "dive") {
+      if (G.lock) { if (code === "Space" || code === "Enter") { lockAttempt(); e.preventDefault(); } else if (code === "Escape") { lockFail(); e.preventDefault(); } return; }
       if (code === "KeyW" || code === "ArrowUp") { tryDrive(0, -1); e.preventDefault(); }
       else if (code === "KeyS" || code === "ArrowDown") { tryDrive(0, 1); e.preventDefault(); }
       else if (code === "KeyA" || code === "ArrowLeft") { tryDrive(-1, 0); e.preventDefault(); }
@@ -578,7 +620,7 @@
       else if (code === "Space") { ping(); e.preventDefault(); }
       else if (code === "KeyF") { flagFaced(); e.preventDefault(); }
       else if (code === "KeyL") { toggleLight(); e.preventDefault(); }
-      else if (code === "KeyE") { excavate(); e.preventDefault(); }
+      else if (code === "KeyE") { secure(); e.preventDefault(); }
       else if (code === "KeyC") { crank(); e.preventDefault(); }
       else if (code === "KeyP") { patch(); e.preventDefault(); }
       else if (code === "Escape") { UI.overlay = "options"; }
@@ -594,10 +636,13 @@
       function pressed(i) { return b[i] && b[i].pressed && !padPrev[i]; }
       if (UI.overlay) { if (pressed(0) || pressed(1) || pressed(9)) UI.overlay = null; }
       else if (G.scene === "dive") {
-        if (pressed(12) || (ax[1] < -0.5 && !padPrev._u)) tryDrive(0, -1); if (pressed(13) || (ax[1] > 0.5 && !padPrev._d)) tryDrive(0, 1);
-        if (pressed(14) || (ax[0] < -0.5 && !padPrev._l)) tryDrive(-1, 0); if (pressed(15) || (ax[0] > 0.5 && !padPrev._r)) tryDrive(1, 0);
+        if (G.lock) { if (pressed(0)) lockAttempt(); if (pressed(1)) lockFail(); }
+        else {
+          if (pressed(12) || (ax[1] < -0.5 && !padPrev._u)) tryDrive(0, -1); if (pressed(13) || (ax[1] > 0.5 && !padPrev._d)) tryDrive(0, 1);
+          if (pressed(14) || (ax[0] < -0.5 && !padPrev._l)) tryDrive(-1, 0); if (pressed(15) || (ax[0] > 0.5 && !padPrev._r)) tryDrive(1, 0);
+          if (pressed(0)) ping(); if (pressed(2)) flagFaced(); if (pressed(1)) toggleLight(); if (pressed(3)) secure(); if (pressed(4)) patch(); if (pressed(5)) crank(); if (pressed(9)) UI.overlay = "help";
+        }
         padPrev._u = ax[1] < -0.5; padPrev._d = ax[1] > 0.5; padPrev._l = ax[0] < -0.5; padPrev._r = ax[0] > 0.5;
-        if (pressed(0)) ping(); if (pressed(2)) flagFaced(); if (pressed(1)) toggleLight(); if (pressed(3)) excavate(); if (pressed(4)) patch(); if (pressed(5)) crank(); if (pressed(9)) UI.overlay = "help";
       } else if (G.scene === "rig") {
         if (pressed(12)) G.shopFocus = (G.shopFocus + SHOP.length - 1) % SHOP.length; if (pressed(13)) G.shopFocus = (G.shopFocus + 1) % SHOP.length;
         if (pressed(0)) buy(SHOP[G.shopFocus].id); if (pressed(9)) startRun(); if (pressed(1)) UI.overlay = "options"; if (pressed(3)) UI.overlay = "help";
@@ -622,5 +667,5 @@
   }
 
   newRun(randomSeed()); resize(); requestAnimationFrame(frame);
-  window.DREADNOUGHT = { G: function () { return G; }, newRun: newRun, startRun: startRun, drive: tryDrive, ping: ping, flagFaced: flagFaced, toggleLight: toggleLight, excavate: excavate, patch: patch, crank: crank, surface: surface, buy: buy, buyPlushie: buyPlushie, moveAnglers: moveAnglers, OPT: OPT };
+  window.DREADNOUGHT = { G: function () { return G; }, newRun: newRun, startRun: startRun, drive: tryDrive, ping: ping, flagFaced: flagFaced, toggleLight: toggleLight, secure: secure, lockAttempt: lockAttempt, patch: patch, crank: crank, surface: surface, buy: buy, buyPlushie: buyPlushie, moveAnglers: moveAnglers, OPT: OPT };
 })();

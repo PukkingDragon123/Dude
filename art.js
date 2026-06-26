@@ -503,6 +503,11 @@
       ctx.strokeStyle = PAL.phosHi; ctx.lineWidth = 1.6; ctx.lineCap = "round";
       for (var v = 0; v < 3; v++) { var yy = s * 0.3 - v * s * 0.26; ctx.beginPath();
         ctx.moveTo(-s * 0.3, yy + s * 0.12); ctx.lineTo(0, yy - s * 0.12); ctx.lineTo(s * 0.3, yy + s * 0.12); ctx.stroke(); }
+    } else if (kind === "signal") {
+      glowDot(ctx, 0, 0, s * 0.55, PAL.amberHi, pulse);
+      ctx.strokeStyle = PAL.amberHi; ctx.lineWidth = Math.max(1, s * 0.09);
+      for (var w = 1; w <= 3; w++) { ctx.globalAlpha = (0.85 - w * 0.2) * (0.5 + 0.5 * Math.sin(t * 4 - w)); ctx.beginPath(); ctx.arc(0, -s * 0.05, s * 0.22 * w, -1.0, 1.0); ctx.stroke(); }
+      ctx.globalAlpha = 1; ctx.fillStyle = PAL.amberHi; ctx.beginPath(); ctx.arc(0, -s * 0.05, s * 0.15, 0, 7); ctx.fill();
     }
     ctx.restore();
   }
@@ -597,8 +602,9 @@
       var x = cx + (k.rx / k.rz) * focal, y = cy + (k.ry / k.rz) * focal; if (x < -bw * 0.4 || x > bw * 1.4) continue;
       var fog2 = Math.max(0, 1 - k.rz / range), sz2 = Math.min(bh * 0.8, (focal * 1.7) / k.rz);
       if (k.isMonster) {
-        var seen = lightOn ? Math.max(fog2, 0.4) : (k.rz < 14 ? (14 - k.rz) / 14 * 0.7 : 0.05);
-        drawAngler3D(ctx, x, y, sz2 * 0.55, { yaw: Math.sin(t * 0.7 + k.rz) * 0.45, pitch: -0.12 + Math.sin(t * 0.5) * 0.08, mouth: 0.18 + 0.12 * Math.sin(t * 1.5), t: t, lit: seen, boss: k.monShape === "leviathan" });
+        var seen = lightOn ? Math.max(fog2, 0.4) : (k.rz < 16 ? (16 - k.rz) / 16 * 0.7 : 0.05);
+        if (k.monShape === "bloop") drawBloop3D(ctx, x, y, sz2 * 0.85, { yaw: Math.sin(t * 0.45 + k.rz) * 0.3, pitch: -0.1, mouth: 0.28 + 0.16 * Math.sin(t * 1.1), t: t, lit: seen });
+        else drawAngler3D(ctx, x, y, sz2 * 0.55, { yaw: Math.sin(t * 0.7 + k.rz) * 0.45, pitch: -0.12 + Math.sin(t * 0.5) * 0.08, mouth: 0.18 + 0.12 * Math.sin(t * 1.5), t: t, lit: seen, boss: false });
       } else {
         var glowSeen = lightOn ? fog2 : (k.rz < 22 ? Math.max(0, (22 - k.rz) / 22) * 0.4 : 0); if (glowSeen <= 0.02) continue;
         var col = k.kind === "vent" ? PAL.phos : k.kind === "source" ? PAL.violetHi : k.kind === "artifact" ? PAL.bio : PAL.bioHi;
@@ -797,6 +803,64 @@
     ctx.fillStyle = PAL.bioHi; ctx.beginPath(); ctx.arc(tip[0], tip[1], lb, 0, 7); ctx.fill();
   }
 
+  // ---------- THE BLOOP — a colossal 3D horror (its own mesh: huge, pale, many-eyed, tendrilled) ----------
+  var _bloop = null;
+  function bloopMesh() {
+    if (_bloop) return _bloop;
+    var nz = 10, ns = 14, rings = [];
+    for (var i = 0; i < nz; i++) {
+      var u = i / (nz - 1), z = -1.25 + u * 2.0;
+      var r = 0.16 + 0.96 * Math.sin(Math.min(1, u * 0.98) * Math.PI);
+      var ring = []; for (var j = 0; j < ns; j++) { var a = j / ns * Math.PI * 2; var rr = r * (1 + 0.1 * Math.sin(a * 3 + i * 0.7) + 0.06 * Math.cos(a * 5 - i)); ring.push([Math.cos(a) * rr, Math.sin(a) * rr * 0.94, z]); }
+      rings.push(ring);
+    }
+    var faces = [];
+    for (var i2 = 0; i2 < nz - 1; i2++) for (var j2 = 0; j2 < ns; j2++) { var jb = (j2 + 1) % ns; faces.push([rings[i2][j2], rings[i2][jb], rings[i2 + 1][jb], rings[i2 + 1][j2]]); }
+    _bloop = { faces: faces, headZ: 0.85 };
+    return _bloop;
+  }
+  function drawBloop3D(ctx, cx, cy, size, o) {
+    o = o || {}; var yaw = o.yaw || 0, pitch = o.pitch || 0, mouth = o.mouth == null ? 0.3 : o.mouth, t = o.t || 0, lit = o.lit == null ? 1 : o.lit, camZ = 3.2;
+    var M = bloopMesh(), light = v3norm([0.3, 0.5, -0.85]);
+    function tp(v) { var r = rot3(v, yaw, pitch); var z = r[2] + camZ; if (z < 0.25) z = 0.25; var f = size / z; return [cx + r[0] * f, cy - r[1] * f, z, r]; }
+    var BODY = [120, 116, 150], DARK = [18, 14, 30];
+    // drifting tendrils first (behind the body)
+    ctx.save(); ctx.lineCap = "round";
+    for (var td = 0; td < 7; td++) { var ba = (td / 7 - 0.5) * 2.2; var base = tp([Math.cos(ba) * 0.5, -0.9, 0.1]); var sway = Math.sin(t * 1.3 + td) * size * 0.22;
+      var midx = base[0] + sway, tipx = base[0] + sway * 1.8 + (td - 3) * size * 0.04, tipy = base[1] + size * (0.7 + 0.3 * Math.abs(Math.sin(t + td)));
+      ctx.strokeStyle = "rgba(90,84,120," + (0.5 * lit + 0.1).toFixed(2) + ")"; ctx.lineWidth = Math.max(1.5, size * 0.03);
+      ctx.beginPath(); ctx.moveTo(base[0], base[1]); ctx.quadraticCurveTo(midx, base[1] + size * 0.4, tipx, tipy); ctx.stroke(); }
+    ctx.restore();
+    // body
+    var drawn = [];
+    for (var i = 0; i < M.faces.length; i++) { var f = M.faces[i]; var p = [tp(f[0]), tp(f[1]), tp(f[2]), tp(f[3])];
+      var n = v3norm(v3cross(v3sub(p[1][3], p[0][3]), v3sub(p[2][3], p[0][3])));
+      var sh = Math.max(0.14, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]);
+      drawn.push({ p: p, z: (p[0][2] + p[1][2] + p[2][2] + p[3][2]) / 4, sh: sh }); }
+    drawn.sort(function (a, b) { return b.z - a.z; });
+    for (var d2 = 0; d2 < drawn.length; d2++) { var dn = drawn[d2], k = (0.3 + dn.sh * 0.7) * (0.45 + lit * 0.55);
+      ctx.fillStyle = "rgb(" + Math.round(DARK[0] + (BODY[0] - DARK[0]) * k) + "," + Math.round(DARK[1] + (BODY[1] - DARK[1]) * k) + "," + Math.round(DARK[2] + (BODY[2] - DARK[2]) * k) + ")";
+      ctx.beginPath(); ctx.moveTo(dn.p[0][0], dn.p[0][1]); for (var q = 1; q < 4; q++) ctx.lineTo(dn.p[q][0], dn.p[q][1]); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.18)"; ctx.lineWidth = 1; ctx.stroke(); }
+    // cavernous maw
+    var head = tp([0, -0.05, M.headZ]), rim = tp([0, 0.6, M.headZ]); var R = Math.max(6, Math.abs(head[1] - rim[1]) * 1.15);
+    var open = R * (0.4 + mouth * 1.6);
+    ctx.save(); ctx.translate(head[0], head[1]);
+    var mg = ctx.createRadialGradient(0, 0, 1, 0, 0, R * 1.3); mg.addColorStop(0, "#1a0510"); mg.addColorStop(0.6, "#0c0308"); mg.addColorStop(1, "rgba(8,2,8,0)");
+    ctx.fillStyle = mg; ctx.beginPath(); ctx.ellipse(0, 0, R * 1.0, open, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgba(150,30,70," + (0.22 + mouth * 0.4).toFixed(2) + ")"; ctx.beginPath(); ctx.ellipse(0, 0, R * 0.55, open * 0.6, 0, 0, 7); ctx.fill();
+    var teeth = 11, tl = R * (0.2 + mouth * 0.16); ctx.fillStyle = "#cabfb0";
+    for (var tn = 0; tn < teeth; tn++) { var fx = (tn / (teeth - 1) - 0.5) * 1.8 * R; poly(ctx, [[fx - R * 0.05, -open], [fx + R * 0.05, -open], [fx, -open + tl]], "#cabfb0"); poly(ctx, [[fx - R * 0.05, open], [fx + R * 0.05, open], [fx, open - tl]], "#bfb4a4"); }
+    ctx.restore();
+    // a CLUSTER of many glowing eyes on the upper body
+    var eyePos = [[-0.4, 0.45, 0.45], [0.4, 0.45, 0.45], [-0.18, 0.62, 0.5], [0.18, 0.62, 0.5], [0, 0.4, 0.6], [-0.55, 0.2, 0.35], [0.55, 0.2, 0.35]];
+    var eg = PAL.bioHi, er = Math.max(1.5, R * 0.09);
+    for (var e = 0; e < eyePos.length; e++) { var ep = tp(eyePos[e]); var bl = 0.5 + 0.5 * Math.sin(t * 2.5 + e * 1.7);
+      glowDot(ctx, ep[0], ep[1], er * 2.6, eg, (0.7 * lit + 0.2) * bl); ctx.fillStyle = eg; ctx.beginPath(); ctx.arc(ep[0], ep[1], er, 0, 7); ctx.fill(); ctx.fillStyle = "#06040a"; ctx.beginPath(); ctx.arc(ep[0], ep[1], er * 0.4, 0, 7); ctx.fill(); }
+    // overall pale aura
+    ctx.save(); ctx.globalAlpha = 0.18 * lit; glowDot(ctx, head[0], head[1], R * 2.2, PAL.violetHi, 1); ctx.restore();
+  }
+
   // ---------- cute cabin plushies (morale decor) ----------
   function drawPlushie(ctx, x, y, s, id, col, t) {
     t = t || 0; col = col || PAL.amber; ctx.save(); ctx.translate(x, y + Math.sin(t * 1.5 + x) * s * 0.04);
@@ -871,6 +935,6 @@
     text: text, wrapText: wrapText, rrect: rrect, drawTitle: drawTitle, catColor: catColor, mix: mix,
     drawGrid: drawGrid, drawCell: drawCell, lootGlyph: lootGlyph, numColor: numColor, glowDot: glowDot, textCentered: textCentered,
     drawForward: drawForward, drawOxygenTank: drawOxygenTank, drawDepthGauge: drawDepthGauge, drawWarnLamp: drawWarnLamp, drawLeak: drawLeak,
-    drawPlushie: drawPlushie, drawRig: drawRig, drawAngler3D: drawAngler3D,
+    drawPlushie: drawPlushie, drawRig: drawRig, drawAngler3D: drawAngler3D, drawBloop3D: drawBloop3D,
   };
 })(typeof window !== "undefined" ? window : this);
