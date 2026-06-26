@@ -557,11 +557,91 @@
     }
   }
 
+  // ---------- first-person 3D forward view (Iron-Lung-style: navigate the black by instinct) ----------
+  // o: { contacts:[{rx,ry,rz,kind,monShape,isMonster,known,source}], snow:[{rx,ry,rz}],
+  //      lightOn, threat(0..1), time, fov, headlightRange, collectRange }
+  function drawForward(ctx, bw, bh, o) {
+    o = o || {}; var cx = bw / 2, cy = bh * 0.5, t = o.time || 0;
+    var fov = o.fov || 1.25, focal = (bw * 0.5) / Math.tan(fov / 2);
+    var range = o.headlightRange || 30, lightOn = o.lightOn;
+
+    // abyss: near-black, a touch of cold blue toward the centre
+    var bg = ctx.createRadialGradient(cx, cy, 2, cx, cy, bh * 0.9);
+    bg.addColorStop(0, lightOn ? "#0a1a22" : "#050a10"); bg.addColorStop(0.5, "#03070c"); bg.addColorStop(1, "#000000");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, bw, bh);
+
+    // headlight cone — a pale wedge of revealed water
+    if (lightOn) {
+      var lg = ctx.createRadialGradient(cx, cy - bh * 0.04, 2, cx, cy, bh * 0.7);
+      lg.addColorStop(0, "rgba(150,200,205,0.22)"); lg.addColorStop(0.5, "rgba(70,110,120,0.08)"); lg.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = lg; ctx.beginPath(); ctx.moveTo(cx, cy - bh * 0.04);
+      ctx.lineTo(cx - bw * 0.46, bh); ctx.lineTo(cx + bw * 0.46, bh); ctx.closePath(); ctx.fill();
+    }
+
+    // streaming marine snow — the motion cue that sells 3D depth
+    var snow = o.snow || [];
+    for (var i = 0; i < snow.length; i++) {
+      var p = snow[i]; if (p.rz <= 0.4) continue;
+      var sx = cx + (p.rx / p.rz) * focal, sy = cy + (p.ry / p.rz) * focal;
+      if (sx < -4 || sx > bw + 4 || sy < -4 || sy > bh + 4) continue;
+      var sz = Math.max(0.5, 2.4 / p.rz * 6);
+      var fog = Math.max(0, 1 - p.rz / (range * 1.4));
+      var a = (lightOn ? 0.5 : 0.16) * fog;
+      if (a <= 0.01) continue;
+      ctx.fillStyle = "rgba(180,205,200," + a.toFixed(3) + ")";
+      ctx.fillRect(sx, sy, sz, sz);
+    }
+
+    // contacts, far-to-near so near ones overlap far ones
+    var cs = (o.contacts || []).slice().sort(function (a, b) { return b.rz - a.rz; });
+    for (var c = 0; c < cs.length; c++) {
+      var k = cs[c]; if (k.rz <= 0.6) continue;
+      var x = cx + (k.rx / k.rz) * focal, y = cy + (k.ry / k.rz) * focal;
+      if (x < -bw * 0.3 || x > bw * 1.3) continue;
+      var fog2 = Math.max(0, 1 - k.rz / range);
+      var sz2 = Math.min(bh * 0.7, (focal * 1.6) / k.rz);
+      if (k.isMonster) {
+        // a darker-than-dark silhouette with glinting eyes; close + lit = full reveal
+        var seen = lightOn ? fog2 : (k.rz < 12 ? (12 - k.rz) / 12 * 0.5 : 0);
+        if (k.rz < 9 && lightOn) { drawPortrait(ctx, x, y, sz2 * 0.5, { category: "creature", name: k.monShape === "leviathan" ? "THE LEVIATHAN" : k.monShape, id: 7, _shape: k.monShape }, t); }
+        else if (seen > 0.02) {
+          ctx.save(); ctx.globalAlpha = Math.min(1, seen + 0.15);
+          ctx.fillStyle = "#01030500"; var bShape = ctx.createRadialGradient(x, y, 0, x, y, sz2 * 0.55);
+          bShape.addColorStop(0, "rgba(6,10,14," + Math.min(0.9, seen + 0.3).toFixed(2) + ")"); bShape.addColorStop(1, "rgba(0,0,0,0)");
+          ctx.fillStyle = bShape; ctx.beginPath(); ctx.ellipse(x, y, sz2 * 0.5, sz2 * 0.62, 0, 0, 7); ctx.fill();
+          // eyes
+          var eg = k.monShape === "leviathan" ? PAL.bloodHi : PAL.bio, es = Math.max(1.5, sz2 * 0.05);
+          var blink = 0.6 + 0.4 * Math.sin(t * 3 + k.rz);
+          ctx.globalAlpha = Math.min(1, (seen + 0.25)) * blink;
+          glowDot(ctx, x - sz2 * 0.13, y - sz2 * 0.05, es * 2.2, eg, 1); glowDot(ctx, x + sz2 * 0.13, y - sz2 * 0.05, es * 2.2, eg, 1);
+          ctx.fillStyle = eg; ctx.beginPath(); ctx.arc(x - sz2 * 0.13, y - sz2 * 0.05, es, 0, 7); ctx.arc(x + sz2 * 0.13, y - sz2 * 0.05, es, 0, 7); ctx.fill();
+          ctx.restore();
+        }
+      } else {
+        // loot/vent/source — a faint glow always hints; the light resolves the glyph
+        var glowSeen = lightOn ? fog2 : (k.rz < 22 ? Math.max(0, (22 - k.rz) / 22) * 0.35 : 0);
+        if (glowSeen <= 0.02) continue;
+        var col = k.kind === "vent" ? PAL.phos : k.kind === "source" ? PAL.violetHi : k.kind === "artifact" ? PAL.bio : PAL.bioHi;
+        ctx.save(); ctx.globalAlpha = Math.min(1, glowSeen + 0.1); glowDot(ctx, x, y, Math.max(4, sz2 * 0.22), col, 1); ctx.restore();
+        if ((lightOn && fog2 > 0.05) || k.kind === "source") {
+          ctx.save(); ctx.globalAlpha = Math.min(1, (k.kind === "source" ? 0.8 : fog2) + 0.1);
+          lootGlyph(ctx, x, y, Math.min(bh * 0.3, sz2 * 0.32), k.kind === "source" ? "shard" : k.kind === "vent" ? "vent" : k.kind === "artifact" ? "artifact" : "data", t);
+          ctx.restore();
+        }
+      }
+    }
+
+    // forward reticle (heading)
+    ctx.strokeStyle = "rgba(120,255,210,0.18)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx - 8, cy); ctx.lineTo(cx + 8, cy); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy + 8); ctx.stroke();
+  }
+
   root.DN = root.DN || {};
   root.DN.Art = {
     PAL: PAL, rebake: rebake, drawWater: drawWater, drawSonar: drawSonar, drawPortrait: drawPortrait,
     drawCockpit: drawCockpit, gauge: gauge, card: card, glyph: glyph, button: button, overlay: overlay,
     text: text, wrapText: wrapText, rrect: rrect, drawTitle: drawTitle, catColor: catColor, mix: mix,
     drawGrid: drawGrid, drawCell: drawCell, lootGlyph: lootGlyph, numColor: numColor, glowDot: glowDot, textCentered: textCentered,
+    drawForward: drawForward,
   };
 })(typeof window !== "undefined" ? window : this);

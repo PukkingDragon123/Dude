@@ -248,6 +248,12 @@
     o.start(t); o.stop(t + 1.6); cleanup(o, g, t + 1.8);
   };
 
+  A.heartbeat = function (intensity) { // low double-thump; faster/louder as a monster nears
+    if (!ok()) return; var t = now(), v = 0.16 + 0.5 * (intensity || 0.5);
+    for (var j = 0; j < 2; j++) { var tt = t + j * 0.13; var g = A.ctx.createGain(); g.connect(A.sfxBus);
+      var o = osc("sine", 58 - j * 8, g); env(g.gain, tt, 0.008, v, 0.15, 0.0001); o.start(tt); o.stop(tt + 0.2); cleanup(o, g, tt + 0.3); }
+  };
+
   A.ascend = function () { // blow ballast: rising whoosh + bubbles
     if (!ok()) return;
     var t = now();
