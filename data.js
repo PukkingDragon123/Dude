@@ -11,8 +11,6 @@
     probeCost: 2,            // oxygen per MANUAL probe (flood-filled cells are free)
     startMoney: 0,
     baseCorruptThreshold: 40,// sanity below this -> scope corruption (raisable by upgrade to 25)
-    surfaceRepair: 0.5,      // fraction of missing hull/sanity recovered on surfacing
-    handSize: 0,             // (legacy field; unused)
   };
 
   // ---- Monster archetypes. dmgType hull|sanity. footprint resolved in game.js. ----

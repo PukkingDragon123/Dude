@@ -82,7 +82,7 @@
       zone: 1, gw: 6, gh: 6, cells: [], hull: 100, oxygen: 100, sanity: 100,
       maxHull: 100, maxOxygen: 100, maxSanity: 100, corruptThr: 40,
       hold: { data: 0, items: [] }, firstProbe: true, flagMode: false, peekArmed: false, peeksLeft: 0,
-      cursor: { x: 0, y: 0 }, encounter: null, ascendConfirm: false,
+      cursor: { x: 0, y: 0 }, encounter: null, ascendConfirm: false, shopFocus: 0, menuSel: 0, padActive: false,
       flash: 0, flashCol: "180,40,40", shake: 0, threatUntil: 0,
       endKind: null, won: false, lastBank: null, tongsSaved: null,
     };
@@ -161,22 +161,28 @@
         if (!ok) continue;
         var monObj = { id: id };
         for (var j = 0; j < fp.length; j++) { var c2 = cell(fp[j][0], fp[j][1]); c2.mon = true; c2.monRef = monObj; }
-        return true;
+        return fp.length;
       }
-      return false;
+      return 0;
     }
 
+    // Z.monsters is a budget of OCCUPIED CELLS (multi-cell bodies count by their footprint),
+    // so occupied-cell density tracks the frozen ~14%->28% targets regardless of footprint mix.
     var placed = 0, guard = 0;
-    if (Z.leviathan) { tryPlace("leviathan"); }
-    while (placed < Z.monsters && guard++ < 3000) { if (tryPlace(rng.pick(Z.pool))) placed++; }
+    if (Z.leviathan) { placed += tryPlace("leviathan"); }
+    while (placed < Z.monsters && guard++ < 3000) { placed += tryPlace(rng.pick(Z.pool)); }
 
     // ---- loot on safe (non-monster) cells, none on the first-probe pocket edge is fine ----
     function freeCells() { var f = []; for (var i = 0; i < G.cells.length; i++) { var c = G.cells[i]; if (!c.mon && !c.lootId) f.push(c); } return f; }
     function placeLoot(id, count) { for (var n = 0; n < count; n++) { var f = freeCells(); if (!f.length) return; var c = rng.pick(f); c.lootId = id; c.loot = LOOT[id].kind; } }
 
     if (Z.shard) placeLoot("shard", Z.shard);
-    var arts = Z.artifacts | 0; if (typeof Z.artifacts === "number") arts = Z.artifacts;
-    for (var a = 0; a < arts; a++) { var ap = Z.artifactPool[rng.int(0, Z.artifactPool.length - 1)]; if (LOOT[ap].minZone && G.zone < LOOT[ap].minZone) ap = "idol"; placeLoot(ap, 1); }
+    var arts = Z.artifacts || 0;
+    for (var a = 0; a < arts; a++) {
+      var apool = Z.artifactPool.filter(function (id) { return !(LOOT[id].minZone && G.zone < LOOT[id].minZone); });
+      if (!apool.length) apool = ["idol"];
+      placeLoot(rng.pick(apool), 1);
+    }
     placeLoot("wreck", Z.wrecks || 0);
     placeLoot("vent", Z.vents || 0);
     placeLoot("data", Z.data || 0);
@@ -193,12 +199,19 @@
     if (G.scene !== "dive") return;
     var c = cell(x, y); if (!c) return;
     Audio.init();
+    // The first meaningful action generates the grid with (x,y) as the guaranteed-safe pocket.
+    // A first action always reveals (never a false-safe peek on an ungenerated grid, and never
+    // a wasted peek charge on the always-safe first cell).
+    if (G.firstProbe && !G.flagMode) {
+      G.peekArmed = false;
+      genGrid(x, y); G.firstProbe = false; pushLog(S.log_first_probe); Audio.ping();
+      reveal(x, y); checkDeath(); return;
+    }
     if (G.peekArmed) { doPeek(x, y); return; }
     if (G.flagMode) { toggleFlag(x, y); return; }
     if (c.revealed) { if (G.up.chord && !c.mon && c.n > 0) chord(x, y); return; }
     if (c.flagged) return;
-    if (G.firstProbe) { genGrid(x, y); G.firstProbe = false; pushLog(S.log_first_probe); Audio.ping(); }
-    else { spendOxygen(); ambientMindDrain(); Audio.ping(); }
+    spendOxygen(); if (G.scene !== "dive") return; ambientMindDrain(); Audio.ping();
     reveal(x, y);
     checkDeath();
   }
@@ -241,9 +254,9 @@
     var m = c.monRef, def = MON[m.id];
     for (var i = 0; i < G.cells.length; i++) { var cc = G.cells[i]; if (cc.monRef === m) { cc.revealed = true; cc.triggered = true; cc.flagged = false; cc.peek = false; } }
     var dmg = G.diveRng.int(def.dmg[0], def.dmg[1]);
-    if (def.dmgType === "sanity") { changeStat("sanity", -dmg); pushLog(fmt(S.log_monster_mind, { name: def.name, dmg: "−" + dmg + " " + S.hud_sanity })); }
+    if (def.dmgType === "sanity") { var sd = Math.round(dmg * sanityDrainMult()); changeStat("sanity", -sd); pushLog(fmt(S.log_monster_mind, { name: def.name, dmg: "−" + sd + " " + S.hud_sanity })); }
     else { changeStat("hull", -dmg); pushLog(fmt(S.log_monster, { name: def.name, dmg: "−" + dmg + " " + S.hud_hull })); }
-    if (def.sanity) changeStat("sanity", -def.sanity);
+    if (def.sanity) changeStat("sanity", -Math.round(def.sanity * sanityDrainMult()));
     Audio.roar(); Audio.damage();
     if (OPT.shake) G.shake = def.tier >= 3 ? 12 : 8;
     G.encounter = { shape: def.shape, name: def.name, until: G.time + 2.6, id: m.id };
@@ -255,7 +268,7 @@
     var def = LOOT[c.lootId], Z = ZONES[G.zone];
     if (def.kind === "data") { var v = Math.round(G.diveRng.int(def.value[0], def.value[1]) * Z.valueMult); G.hold.data += v; pushLog(fmt(S.log_data, { amt: v })); Audio.scan(); }
     else if (def.kind === "vent") { changeStat("oxygen", def.o2); changeStat("hull", def.hull); pushLog(fmt(S.log_vent, { o2: def.o2, hull: def.hull })); Audio.vent(); }
-    else if (def.kind === "wreck") { openWreck(c); pushLog(S.log_wreck); Audio.good(); }
+    else if (def.kind === "wreck") { var wv = Math.round(G.diveRng.int(def.value[0], def.value[1]) * Z.valueMult); G.hold.data += wv; openWreck(c); pushLog(S.log_wreck); Audio.good(); }
     else if (def.kind === "artifact") { var val = Math.round(G.diveRng.int(def.value[0], def.value[1]) * Z.valueMult); G.hold.items.push({ id: c.lootId, name: def.name, value: val, kind: "artifact" }); pushLog(fmt(S.log_artifact, { name: def.name })); Audio.good(); G.flash = 0.3; G.flashCol = "70,240,200"; }
     else if (def.kind === "shard") { var sv = Math.round(G.diveRng.int(def.value[0], def.value[1]) * Z.valueMult); G.hold.items.push({ id: "shard", name: def.name, value: sv, kind: "shard" }); pushLog(S.log_shard); Audio.good(); G.flash = 0.4; G.flashCol = "120,110,220"; }
   }
@@ -267,6 +280,7 @@
   }
 
   function toggleFlag(x, y) {
+    if (G.scene !== "dive") return;
     var c = cell(x, y); if (!c || c.revealed) return;
     c.flagged = !c.flagged; pushLog(c.flagged ? S.log_flag : S.log_unflag); Audio.card();
   }
@@ -386,12 +400,12 @@
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = "#04060a"; ctx.fillRect(0, 0, W, H);
     if (!G) return;
+    if (UI.overlay === "help") return renderHelp();
+    if (UI.overlay === "options") return renderOptions();
     if (G.scene === "dive") return renderDive();
     if (G.scene === "port") return renderPort();
     if (G.scene === "result") return renderResult();
     if (G.scene === "end") return renderEnd();
-    if (UI.scene === "help") return renderHelp();
-    if (UI.scene === "options") return renderOptions();
     return renderTitle();
   }
 
@@ -438,19 +452,21 @@
   function drawDiveBottom() {
     ctx.fillStyle = PAL.panel; ctx.fillRect(0, L.bottom.y, W, L.bottom.h);
     ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.fillRect(0, L.bottom.y, W, 3);
-    // hold readout + log (left)
+    // hold readout + log (left) — clipped to the space left of the buttons so nothing overlaps on narrow screens
     var x = 14, y = L.bottom.y + 22, fs = clamp(W * 0.018, 11, 16) * OPT.textScale;
+    ctx.save(); ctx.beginPath(); ctx.rect(0, L.bottom.y, Math.max(60, L.buttons.flag.x - 18), L.bottom.h); ctx.clip();
     var arts = G.hold.items.length;
     Art.text(ctx, S.hud_hold + ": ₽" + G.hold.data + " " + S.hud_data + (arts ? "  +" + arts + " " + (arts === 1 ? "artifact" : "artifacts") : ""), x, y, fs, PAL.bioHi, "left");
     if (peeksMax() > 0) Art.text(ctx, S.hud_peeks + ": " + G.peeksLeft + "/" + peeksMax(), x, y + fs + 6, fs * 0.9, PAL.amber, "left");
     var ly = L.bottom.y + L.bottom.h - 10;
     for (var i = 0; i < 2; i++) { var idx = G.log.length - 1 - i; if (idx < 0) break; ctx.globalAlpha = 1 - i * 0.4; Art.text(ctx, "› " + G.log[idx], x, ly - i * (fs + 3), fs * 0.92, i === 0 ? PAL.phosHi : PAL.textDim, "left"); }
     ctx.globalAlpha = 1;
+    ctx.restore();
     // buttons (right)
     Art.button(ctx, L.buttons.ascend, S.btn_ascend, { primary: true, hover: UI.hover === "ascend" });
     Art.button(ctx, L.buttons.flag, G.flagMode ? S.flag_on : S.flag_off, { primary: G.flagMode, hover: UI.hover === "flag" });
     if (peeksMax() > 0) Art.button(ctx, L.buttons.peek, S.btn_peek + (G.peekArmed ? " •" : ""), { primary: G.peekArmed, hover: UI.hover === "peek", disabled: G.peeksLeft <= 0 });
-    Art.button(ctx, L.buttons.menu, S.menu_back, { hover: UI.hover === "menu" });
+    Art.button(ctx, L.buttons.menu, S.menu_help, { hover: UI.hover === "menu" });
   }
 
   function drawEncounter() {
@@ -497,7 +513,7 @@
       var it = SHOP[i], lvl = G.up[it.id] || 0, maxed = lvl >= it.costs.length;
       var r = { x: shopX, y: ry, w: shopW, h: rowH - 6 };
       ctx.fillStyle = "rgba(10,14,20,0.55)"; Art.rrect(ctx, r.x, r.y, r.w, r.h, 5); ctx.fill();
-      ctx.strokeStyle = "rgba(90,100,114,0.5)"; ctx.lineWidth = 1; Art.rrect(ctx, r.x, r.y, r.w, r.h, 5); ctx.stroke();
+      ctx.strokeStyle = (G.padActive && G.shopFocus === i) ? PAL.phosHi : "rgba(90,100,114,0.5)"; ctx.lineWidth = (G.padActive && G.shopFocus === i) ? 2 : 1; Art.rrect(ctx, r.x, r.y, r.w, r.h, 5); ctx.stroke();
       var label = it.name + (it.costs.length > 1 ? "  [" + lvl + "/" + it.costs.length + "]" : (lvl ? "  ✓" : ""));
       Art.text(ctx, label, r.x + 10, r.y + 18, clamp(r.w * 0.045, 12, 16), maxed ? PAL.textDim : PAL.text, "left");
       Art.wrapText(ctx, it.desc, r.x + r.w * 0.40, r.y + r.h - 9, r.w * 0.52, clamp(r.w * 0.032, 9, 12), PAL.textDim);
@@ -542,6 +558,8 @@
     // menu/back
     UI.backBtn = { x: 12, y: H - 46, w: 120, h: 36 };
     Art.button(ctx, UI.backBtn, S.menu_options, { hover: UI.hover === "back" });
+    UI.briefBtn = { x: 140, y: H - 46, w: 120, h: 36 };
+    Art.button(ctx, UI.briefBtn, S.menu_help, { hover: UI.hover === "brief" });
     Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
   }
 
@@ -554,7 +572,7 @@
     Art.text(ctx, b.items.length + " artifact(s) to the hold", W / 2, y + 30, clamp(W * 0.022, 12, 18), PAL.text, "center");
     if (G.loreSeen.length && G.diveCount % 1 === 0) { var lore = LORE[clamp(G.loreSeen[G.loreSeen.length - 1], 0, LORE.length - 1)]; Art.wrapText(ctx, lore, W / 2, y + 64, clamp(W * 0.6, 280, 640), clamp(W * 0.016, 11, 15), PAL.textDim); }
     UI.contBtn = { x: W / 2 - 120, y: H - clamp(H * 0.18, 90, 150), w: 240, h: 52 };
-    Art.button(ctx, UI.contBtn, S.port_title.split(" ")[0] === "PORT" ? "TO PORT →" : "TO PORT →", { primary: true, hover: UI.hover === "cont" });
+    Art.button(ctx, UI.contBtn, "TO PORT →", { primary: true, hover: UI.hover === "cont" });
     Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
   }
 
@@ -588,7 +606,7 @@
     Art.text(ctx, S.tagline, W / 2, cy + clamp(W * 0.07, 34, 60), clamp(W * 0.016, 10, 16), PAL.textDim, "center");
     UI.menu = []; var bw = clamp(W * 0.4, 220, 340), bh = clamp(H * 0.075, 44, 62), bx = (W - bw) / 2, by = H * 0.5, gap = 14;
     var labels = [[S.menu_dive, "dive", true], [S.menu_help, "help", false], [S.menu_options, "options", false]];
-    for (var i = 0; i < labels.length; i++) { var r = { x: bx, y: by + i * (bh + gap), w: bw, h: bh }; Art.button(ctx, r, labels[i][0], { primary: labels[i][2], hover: UI.hover === "m" + i }); UI.menu.push({ r: r, act: labels[i][1] }); }
+    for (var i = 0; i < labels.length; i++) { var r = { x: bx, y: by + i * (bh + gap), w: bw, h: bh }; Art.button(ctx, r, labels[i][0], { primary: labels[i][2], hover: UI.hover === "m" + i || (G.padActive && G.menuSel === i) }); UI.menu.push({ r: r, act: labels[i][1] }); }
     Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
   }
   function renderHelp() {
@@ -622,24 +640,23 @@
   }
 
   // ---------------- input ----------------
-  var UI = { scene: "title", hover: null, menu: [], shopHit: [], zoneHit: [], optHit: [] };
+  var UI = { scene: "title", overlay: null, hover: null, menu: [], shopHit: [], zoneHit: [], optHit: [] };
   function pt(e) { var rect = canvas.getBoundingClientRect(); var src = e.touches && e.touches[0] ? e.touches[0] : (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e; return { x: src.clientX - rect.left, y: src.clientY - rect.top }; }
   function inside(r, p) { return r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; }
 
   function onDown(p, flagIntent) {
     Audio.init();
     if (!G) return;
+    if (UI.overlay) { // help / options overlay sits on top of any scene; BACK just closes it
+      if (UI.overlay === "options" && UI.optHit) for (var i = 0; i < UI.optHit.length; i++) if (inside(UI.optHit[i].r, p)) { OPT[UI.optHit[i].key] = !OPT[UI.optHit[i].key]; saveOpt(); Audio.setEnabled(OPT.sound); Audio.card(); return; }
+      if (inside(UI.backBtn, p)) { UI.overlay = null; Audio.card(); } return;
+    }
     if (G.scene === "dive") return onDiveDown(p, flagIntent);
     if (G.scene === "port") return onPortDown(p);
     if (G.scene === "result") { if (inside(UI.contBtn, p)) { Audio.card(); backToPort(); } return; }
-    if (G.scene === "end") { if (inside(UI.contBtn, p)) { Audio.card(); if (G.won) { backToPort(); } else { backToPort(); } } return; }
-    // title-family
-    if (UI.scene === "help" || UI.scene === "options") {
-      if (UI.scene === "options" && UI.optHit) for (var i = 0; i < UI.optHit.length; i++) if (inside(UI.optHit[i].r, p)) { OPT[UI.optHit[i].key] = !OPT[UI.optHit[i].key]; saveOpt(); Audio.setEnabled(OPT.sound); Audio.card(); return; }
-      if (inside(UI.backBtn, p)) { UI.scene = "title"; G.scene = "titlemenu"; Audio.card(); } return;
-    }
+    if (G.scene === "end") { if (inside(UI.contBtn, p)) { Audio.card(); backToPort(); } return; }
     for (var m = 0; m < UI.menu.length; m++) if (inside(UI.menu[m].r, p)) { var act = UI.menu[m].act; Audio.card();
-      if (act === "dive") { G.scene = "port"; } else if (act === "help") { UI.scene = "help"; G.scene = "titlemenu"; } else if (act === "options") { UI.scene = "options"; G.scene = "titlemenu"; } return; }
+      if (act === "dive") G.scene = "port"; else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; return; }
   }
 
   function onDiveDown(p, flagIntent) {
@@ -647,7 +664,7 @@
     if (inside(L.buttons.ascend, p)) { if (G.hold.data > 0 || G.hold.items.length) G.ascendConfirm = true; else ascend(); return; }
     if (inside(L.buttons.flag, p)) { G.flagMode = !G.flagMode; G.peekArmed = false; Audio.card(); return; }
     if (peeksMax() > 0 && inside(L.buttons.peek, p)) { if (G.peeksLeft > 0) { G.peekArmed = !G.peekArmed; G.flagMode = false; Audio.card(); } else pushLog(S.log_peek_none); return; }
-    if (inside(L.buttons.menu, p)) { G.ascendConfirm = true; return; }
+    if (inside(L.buttons.menu, p)) { UI.overlay = "help"; return; }
     var hit = cellAtPoint(p);
     if (hit) { if (flagIntent) toggleFlag(hit.x, hit.y); else probe(hit.x, hit.y); G.cursor = { x: hit.x, y: hit.y }; }
   }
@@ -657,11 +674,13 @@
     for (var z = 0; z < UI.zoneHit.length; z++) if (inside(UI.zoneHit[z].r, p)) { G.selZone = UI.zoneHit[z].z; Audio.card(); return; }
     if (inside(UI.sellBtn, p)) { sellCargo(); return; }
     if (inside(UI.diveBtn, p)) { Audio.card(); startDive(G.selZone); return; }
-    if (inside(UI.backBtn, p)) { UI.scene = "options"; G.scene = "titlemenu"; Audio.card(); return; }
+    if (inside(UI.briefBtn, p)) { UI.overlay = "help"; Audio.card(); return; }
+    if (inside(UI.backBtn, p)) { UI.overlay = "options"; Audio.card(); return; }
   }
 
   function onMove(p) {
     UI.hover = null; if (!G) return;
+    if (UI.overlay) { UI.hover = inside(UI.backBtn, p) ? "back" : null; return; }
     if (G.scene === "dive") {
       if (G.ascendConfirm) { if (inside(UI.ascYes, p)) UI.hover = "ascyes"; else if (inside(UI.ascNo, p)) UI.hover = "ascno"; return; }
       if (inside(L.buttons.ascend, p)) UI.hover = "ascend"; else if (inside(L.buttons.flag, p)) UI.hover = "flag";
@@ -670,16 +689,15 @@
     }
     if (G.scene === "port") {
       for (var i = 0; i < UI.shopHit.length; i++) if (inside(UI.shopHit[i].r, p)) { UI.hover = "buy" + UI.shopHit[i].id; return; }
-      if (inside(UI.sellBtn, p)) UI.hover = "sell"; else if (inside(UI.diveBtn, p)) UI.hover = "dive"; else if (inside(UI.backBtn, p)) UI.hover = "back"; return;
+      if (inside(UI.sellBtn, p)) UI.hover = "sell"; else if (inside(UI.diveBtn, p)) UI.hover = "dive"; else if (inside(UI.briefBtn, p)) UI.hover = "brief"; else if (inside(UI.backBtn, p)) UI.hover = "back"; return;
     }
     if (G.scene === "result" || G.scene === "end") { if (inside(UI.contBtn, p)) UI.hover = "cont"; return; }
-    if (UI.scene === "help" || UI.scene === "options") { if (inside(UI.backBtn, p)) UI.hover = "back"; return; }
     for (var m = 0; m < UI.menu.length; m++) if (inside(UI.menu[m].r, p)) UI.hover = "m" + m;
   }
 
   canvas.addEventListener("mousedown", function (e) { onDown(pt(e), e.button === 2); });
   canvas.addEventListener("mousemove", function (e) { onMove(pt(e)); });
-  canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); if (G && G.scene === "dive") { var h = cellAtPoint(pt(e)); if (h) toggleFlag(h.x, h.y); } });
+  canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); }); // flag is routed via mousedown button 2 (flagIntent)
   var touchStart = 0, touchPt = null, longTimer = null, longFired = false;
   canvas.addEventListener("touchstart", function (e) { e.preventDefault(); touchPt = pt(e); touchStart = perfTime(); longFired = false;
     if (G && G.scene === "dive") { var h = cellAtPoint(touchPt); if (h) { longTimer = setTimeout(function () { longFired = true; toggleFlag(h.x, h.y); G.cursor = { x: h.x, y: h.y }; }, 380); } }
@@ -690,6 +708,8 @@
   // keyboard (physical codes)
   window.addEventListener("keydown", function (e) {
     var code = e.code; if (!G) return;
+    if (UI.overlay) { if (code === "Escape" || code === "Enter" || code === "Space" || code === "KeyH") { UI.overlay = null; e.preventDefault(); } return; }
+    if (code === "KeyH") { UI.overlay = "help"; e.preventDefault(); return; }
     if (G.scene === "dive") {
       if (code === "ArrowUp") { G.cursor.y = clamp(G.cursor.y - 1, 0, G.gh - 1); e.preventDefault(); }
       else if (code === "ArrowDown") { G.cursor.y = clamp(G.cursor.y + 1, 0, G.gh - 1); e.preventDefault(); }
@@ -704,25 +724,41 @@
       else if (code === "ArrowRight") { G.selZone = clamp(G.selZone + 1, 1, maxZone()); }
       else if (code === "ArrowLeft") { G.selZone = clamp(G.selZone - 1, 1, maxZone()); } }
     else if (G.scene === "result" || G.scene === "end") { if (code === "Enter" || code === "Space") { backToPort(); e.preventDefault(); } }
-    else { if (code === "Enter" || code === "Space") { G.scene = "port"; e.preventDefault(); } else if (code === "KeyH") { UI.scene = "help"; G.scene = "titlemenu"; } }
+    else { if (code === "Enter" || code === "Space") { G.scene = "port"; e.preventDefault(); } }
   });
 
   // gamepad
   var padPrev = {};
   function pollPad() {
     var pads = navigator.getGamepads ? navigator.getGamepads() : []; if (!G) return;
-    for (var g = 0; g < pads.length; g++) { var gp = pads[g]; if (!gp) continue; var b = gp.buttons;
+    for (var g = 0; g < pads.length; g++) { var gp = pads[g]; if (!gp) continue; var b = gp.buttons; G.padActive = true;
       function pressed(i) { return b[i] && b[i].pressed && !padPrev[i]; }
-      if (G.scene === "dive") {
-        if (pressed(12)) G.cursor.y = clamp(G.cursor.y - 1, 0, G.gh - 1); if (pressed(13)) G.cursor.y = clamp(G.cursor.y + 1, 0, G.gh - 1);
-        if (pressed(14)) G.cursor.x = clamp(G.cursor.x - 1, 0, G.gw - 1); if (pressed(15)) G.cursor.x = clamp(G.cursor.x + 1, 0, G.gw - 1);
-        if (pressed(0)) probe(G.cursor.x, G.cursor.y);
-        if (pressed(2)) toggleFlag(G.cursor.x, G.cursor.y);
-        if (pressed(3)) { if (G.hold.data > 0 || G.hold.items.length) G.ascendConfirm = true; else ascend(); }
-        if (pressed(1)) G.ascendConfirm = false;
-      } else if (G.scene === "port") { if (pressed(14)) G.selZone = clamp(G.selZone - 1, 1, maxZone()); if (pressed(15)) G.selZone = clamp(G.selZone + 1, 1, maxZone()); if (pressed(9) || pressed(0)) startDive(G.selZone); }
-      else if (G.scene === "result" || G.scene === "end") { if (pressed(0) || pressed(9)) backToPort(); }
-      else { if (pressed(0) || pressed(9)) G.scene = "port"; }
+      if (UI.overlay) {
+        if (pressed(0) || pressed(1) || pressed(9)) UI.overlay = null;
+      } else if (G.scene === "dive") {
+        if (G.ascendConfirm) { if (pressed(0)) ascend(); else if (pressed(1)) G.ascendConfirm = false; }
+        else {
+          if (pressed(12)) G.cursor.y = clamp(G.cursor.y - 1, 0, G.gh - 1); if (pressed(13)) G.cursor.y = clamp(G.cursor.y + 1, 0, G.gh - 1);
+          if (pressed(14)) G.cursor.x = clamp(G.cursor.x - 1, 0, G.gw - 1); if (pressed(15)) G.cursor.x = clamp(G.cursor.x + 1, 0, G.gw - 1);
+          if (pressed(0)) probe(G.cursor.x, G.cursor.y);
+          if (pressed(2)) toggleFlag(G.cursor.x, G.cursor.y);
+          if (pressed(3)) { if (G.hold.data > 0 || G.hold.items.length) G.ascendConfirm = true; else ascend(); }
+          if (pressed(4) || pressed(5)) { if (peeksMax() > 0 && G.peeksLeft > 0) { G.peekArmed = !G.peekArmed; G.flagMode = false; } }
+          if (pressed(9)) UI.overlay = "help";
+        }
+      } else if (G.scene === "port") {
+        if (pressed(12)) G.shopFocus = (G.shopFocus + SHOP.length - 1) % SHOP.length;
+        if (pressed(13)) G.shopFocus = (G.shopFocus + 1) % SHOP.length;
+        if (pressed(14)) G.selZone = clamp(G.selZone - 1, 1, maxZone()); if (pressed(15)) G.selZone = clamp(G.selZone + 1, 1, maxZone());
+        if (pressed(0)) buy(SHOP[G.shopFocus].id);
+        if (pressed(2)) sellCargo();
+        if (pressed(3) || pressed(9)) startDive(G.selZone);
+      } else if (G.scene === "result" || G.scene === "end") { if (pressed(0) || pressed(9)) backToPort(); }
+      else { // title menu
+        if (pressed(12)) G.menuSel = (G.menuSel + UI.menu.length - 1) % (UI.menu.length || 1);
+        if (pressed(13)) G.menuSel = (G.menuSel + 1) % (UI.menu.length || 1);
+        if (pressed(0) || pressed(9)) { var act = UI.menu[G.menuSel] ? UI.menu[G.menuSel].act : "dive"; if (act === "dive") G.scene = "port"; else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; }
+      }
       for (var i = 0; i < b.length; i++) padPrev[i] = b[i] && b[i].pressed;
     }
   }

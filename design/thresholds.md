@@ -18,13 +18,15 @@ Frozen before content. All balance numbers live in `data.js`; tune one at a time
   clicked cell + its neighbours). Flags free. Chording (upgrade) clears satisfied numbers.
 - Multi-cell monsters: each occupied cell counts independently (footprint deducible from numbers).
 
-## Zones (shallow → deep)  [name, depth m, grid, monsters, data, artifacts, wrecks, vents, value×, sanity drain]
+## Zones (shallow → deep)  [name, depth m, grid, monster-cells, data, artifacts, wrecks, vents, value×, sanity drain]
+<!-- "monster-cells" is the budget of OCCUPIED CELLS (multi-cell bodies count by footprint), so
+     occupied-cell density tracks the target regardless of footprint mix. -->
 1. Continental Shelf — 120m  — 6×6  — 5  — 6  — 0–1 — 1 — 1 — ×1.0 — 4
 2. The Twilight      — 600m  — 7×7  — 8  — 7  — 1   — 1 — 1 — ×1.6 — 7
 3. The Midnight      — 1500m — 8×8  — 13 — 8  — 1–2 — 2 — 1 — ×2.5 — 10
 4. The Abyss         — 3200m — 9×9  — 19 — 9  — 2   — 2 — 2 — ×4.0 — 14
 5. The Hadal Trench  — 5400m — 10×10— 27 — 10 — 2–3 — 2 — 2 — ×6.0 — 18
-6. THE SOURCE        — 6800m — 10×10— 30 — 8  — 1(shard)+Leviathan — 1 — 2 — ×8.0 — 22
+6. THE SOURCE        — 6800m — 10×10— 26 — 8  — 1(shard)+Leviathan — 1 — 2 — ×8.0 — 22
 - Densities ~14% (Z1) → ~28% (Z5/6). First-safe + tools keep it fair; deep guesses are
   deliberate calculated risk (designs embrace this).
 

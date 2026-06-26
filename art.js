@@ -520,8 +520,10 @@
       } else { // safe revealed cell, recessed phosphor face
         ctx.fillStyle = "#06100c"; rrect(ctx, x, y, s, s, r); ctx.fill();
         ctx.strokeStyle = "rgba(24,70,54,0.7)"; ctx.lineWidth = 1; rrect(ctx, x, y, s, s, r); ctx.stroke();
-        if (c.loot) lootGlyph(ctx, x + s / 2, y + s / 2, s * 0.34, c.loot, t);
-        else { var nshow = (c.dnum != null ? c.dnum : c.n); if (nshow > 0) textCentered(ctx, nshow + "", x + s / 2, y + s / 2, Math.round(s * 0.58), c.cor ? PAL.violetHi : numColor(nshow)); }
+        var nshow = (c.dnum != null ? c.dnum : c.n);
+        if (c.loot) { lootGlyph(ctx, x + s * 0.42, y + s * 0.44, s * 0.30, c.loot, t);
+          if (nshow > 0) textCentered(ctx, nshow + "", x + s * 0.80, y + s * 0.80, Math.round(s * 0.34), c.cor ? PAL.violetHi : numColor(nshow)); }
+        else if (nshow > 0) textCentered(ctx, nshow + "", x + s / 2, y + s / 2, Math.round(s * 0.58), c.cor ? PAL.violetHi : numColor(nshow));
       }
     } else { // fogged faceted tile
       var gg = ctx.createLinearGradient(x, y, x, y + s); gg.addColorStop(0, PAL.steelHi); gg.addColorStop(0.5, PAL.steel); gg.addColorStop(1, PAL.steelLo);
