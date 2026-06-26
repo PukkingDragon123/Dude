@@ -636,12 +636,127 @@
     ctx.beginPath(); ctx.moveTo(cx - 8, cy); ctx.lineTo(cx + 8, cy); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy + 8); ctx.stroke();
   }
 
+  // ---------- DIEGETIC instruments (no text/bars — physical gauges + a leaking hull) ----------
+
+  // a real oxygen tank: vertical pressure cylinder whose liquid/charge level drops
+  function drawOxygenTank(ctx, x, y, w, h, frac, t) {
+    frac = Math.max(0, Math.min(1, frac)); t = t || 0;
+    var r = w * 0.42;
+    // steel body
+    var body = ctx.createLinearGradient(x, y, x + w, y);
+    body.addColorStop(0, PAL.steelLo); body.addColorStop(0.3, PAL.steelHi); body.addColorStop(0.55, PAL.steel); body.addColorStop(1, "#0d1116");
+    ctx.fillStyle = body; rrect(ctx, x, y, w, h, r); ctx.fill();
+    ctx.strokeStyle = "#05080c"; ctx.lineWidth = 2; rrect(ctx, x, y, w, h, r); ctx.stroke();
+    // valve cap on top
+    ctx.fillStyle = PAL.steelHi; rrect(ctx, x + w * 0.3, y - h * 0.06, w * 0.4, h * 0.06, 2); ctx.fill();
+    ctx.fillStyle = PAL.rivet; ctx.fillRect(x + w * 0.44, y - h * 0.11, w * 0.12, h * 0.06);
+    // glass sight-gauge down the middle
+    var gx = x + w * 0.34, gw = w * 0.32, gy = y + h * 0.10, gh = h * 0.82;
+    ctx.fillStyle = "#03070b"; rrect(ctx, gx, gy, gw, gh, gw * 0.3); ctx.fill();
+    ctx.save(); rrect(ctx, gx, gy, gw, gh, gw * 0.3); ctx.clip();
+    var lvlY = gy + gh * (1 - frac);
+    var low = frac < 0.28;
+    var liq = low ? (frac < 0.14 ? PAL.bloodHi : PAL.amber) : PAL.bio;
+    var lg = ctx.createLinearGradient(gx, lvlY, gx, gy + gh);
+    lg.addColorStop(0, liq); lg.addColorStop(1, low ? "#3a1208" : "#063a2c");
+    ctx.fillStyle = lg; ctx.fillRect(gx, lvlY, gw, gy + gh - lvlY);
+    // wavy meniscus
+    ctx.fillStyle = low ? PAL.amberHi : PAL.bioHi; ctx.beginPath(); ctx.moveTo(gx, lvlY);
+    for (var i = 0; i <= 6; i++) ctx.lineTo(gx + gw * i / 6, lvlY + Math.sin(t * 3 + i) * 1.5);
+    ctx.lineTo(gx + gw, lvlY + 3); ctx.lineTo(gx, lvlY + 3); ctx.closePath(); ctx.fill();
+    // bubbles
+    for (var b = 0; b < 5; b++) { var by = gy + gh - ((t * (10 + b * 4) + b * 30) % gh); if (by < lvlY) continue; ctx.fillStyle = "rgba(180,255,230,0.5)"; ctx.beginPath(); ctx.arc(gx + gw * (0.2 + 0.6 * ((b * 37) % 100) / 100), by, 1.2, 0, 7); ctx.fill(); }
+    ctx.restore();
+    ctx.strokeStyle = "rgba(120,150,150,0.5)"; ctx.lineWidth = 1; rrect(ctx, gx, gy, gw, gh, gw * 0.3); ctx.stroke();
+    // tick marks
+    ctx.strokeStyle = "rgba(150,170,170,0.5)"; for (var k = 0; k <= 4; k++) { var ty = gy + gh * k / 4; ctx.beginPath(); ctx.moveTo(gx - 3, ty); ctx.lineTo(gx, ty); ctx.moveTo(gx + gw, ty); ctx.lineTo(gx + gw + 3, ty); ctx.stroke(); }
+    // low-air warning glow
+    if (low) { var p = 0.5 + 0.5 * Math.sin(t * 6); ctx.save(); ctx.globalAlpha = p * 0.5; glowDot(ctx, x + w / 2, y + h * 0.5, w * 0.7, frac < 0.14 ? PAL.bloodHi : PAL.amberHi, 1); ctx.restore(); }
+  }
+
+  // mechanical depth gauge — a needle dial
+  function drawDepthGauge(ctx, cx, cy, r, frac, t) {
+    frac = Math.max(0, Math.min(1, frac));
+    ctx.beginPath(); ctx.arc(cx, cy, r + 4, 0, 7); ctx.fillStyle = PAL.steelLo; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = PAL.steel; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fillStyle = "#0b0e12"; ctx.fill();
+    // ticks across a 270° arc
+    var a0 = Math.PI * 0.75, a1 = Math.PI * 2.25;
+    for (var i = 0; i <= 10; i++) { var a = a0 + (a1 - a0) * i / 10; var deep = i >= 8;
+      ctx.strokeStyle = deep ? PAL.blood : "rgba(170,190,190,0.7)"; ctx.lineWidth = deep ? 2 : 1;
+      ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * (r - 5), cy + Math.sin(a) * (r - 5)); ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.stroke(); }
+    // needle
+    var na = a0 + (a1 - a0) * frac;
+    ctx.strokeStyle = PAL.amberHi; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(na) * (r - 6), cy + Math.sin(na) * (r - 6)); ctx.stroke();
+    ctx.fillStyle = PAL.amber; ctx.beginPath(); ctx.arc(cx, cy, r * 0.12, 0, 7); ctx.fill();
+    ctx.strokeStyle = "rgba(120,255,210,0.06)"; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
+  }
+
+  // a blinking warning lamp
+  function drawWarnLamp(ctx, x, y, r, on, col, t) {
+    col = col || PAL.bloodHi;
+    ctx.fillStyle = PAL.steelLo; ctx.beginPath(); ctx.arc(x, y, r + 3, 0, 7); ctx.fill();
+    var p = on ? (0.4 + 0.6 * Math.abs(Math.sin(t * 7))) : 0.08;
+    if (on) { ctx.save(); ctx.globalAlpha = p * 0.7; glowDot(ctx, x, y, r * 2.4, col, 1); ctx.restore(); }
+    ctx.fillStyle = on ? mix("#220505", col, p) : "#1a1d22"; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+    ctx.strokeStyle = "#05080c"; ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  // hull breach made visible: progressive water ingress over the whole screen (no health bar)
+  // sev 0..1 = how breached the hull is (1 = catastrophic)
+  function drawLeak(ctx, w, h, sev, t) {
+    if (sev <= 0.001) return; t = t || 0;
+    ctx.save();
+    // edge streams from the top — more + faster as sev rises
+    var streams = Math.floor(sev * 9);
+    for (var i = 0; i < streams; i++) {
+      var sx = ((i * 137 + 40) % 100) / 100 * w;
+      var len = h * (0.25 + 0.65 * ((i * 53) % 100) / 100) * (0.5 + sev);
+      var ww = 1 + sev * 2.5;
+      var grd = ctx.createLinearGradient(sx, 0, sx, len);
+      grd.addColorStop(0, "rgba(120,190,200,0.45)"); grd.addColorStop(1, "rgba(60,110,120,0.0)");
+      ctx.fillStyle = grd; ctx.fillRect(sx, 0, ww, len);
+      // running droplet
+      var dy = (t * (120 + i * 30)) % (len + 30);
+      ctx.fillStyle = "rgba(200,235,240,0.6)"; ctx.fillRect(sx - 0.5, dy, ww + 1, 4 + sev * 4);
+    }
+    // condensation specks
+    if (sev > 0.3) { ctx.fillStyle = "rgba(180,210,215,0.25)"; for (var c = 0; c < sev * 30; c++) { var px = ((c * 71) % 100) / 100 * w, py = ((c * 167) % 100) / 100 * h * 0.6; ctx.fillRect(px, py, 1.5, 1.5); } }
+    // corner cracks with light leaking, at high sev
+    if (sev > 0.45) {
+      ctx.strokeStyle = "rgba(150,200,210," + (0.3 + sev * 0.4).toFixed(2) + ")"; ctx.lineWidth = 1.4;
+      var corners = [[0, 0], [w, 0], [0, h], [w, h]];
+      for (var cc = 0; cc < corners.length; cc++) { var ox = corners[cc][0], oy = corners[cc][1], dx = ox === 0 ? 1 : -1, dy = oy === 0 ? 1 : -1;
+        ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox + dx * w * 0.12, oy + dy * h * 0.04); ctx.lineTo(ox + dx * w * 0.07, oy + dy * h * 0.14); ctx.lineTo(ox + dx * w * 0.18, oy + dy * h * 0.20); ctx.stroke(); }
+    }
+    // rising flood at the bottom
+    var flood = h * 0.22 * sev * (sev > 0.5 ? 1.5 : 1);
+    if (flood > 1) {
+      var fy = h - flood;
+      var fg = ctx.createLinearGradient(0, fy, 0, h); fg.addColorStop(0, "rgba(40,90,100,0.35)"); fg.addColorStop(1, "rgba(15,45,55,0.6)");
+      ctx.fillStyle = fg; ctx.beginPath(); ctx.moveTo(0, fy);
+      for (var x2 = 0; x2 <= w; x2 += w / 12) ctx.lineTo(x2, fy + Math.sin(x2 * 0.03 + t * 2.5) * 4);
+      ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath(); ctx.fill();
+      // surface shimmer
+      ctx.strokeStyle = "rgba(170,220,225,0.4)"; ctx.lineWidth = 1; ctx.beginPath();
+      for (var x3 = 0; x3 <= w; x3 += w / 12) { var yy = fy + Math.sin(x3 * 0.03 + t * 2.5) * 4; if (x3 === 0) ctx.moveTo(x3, yy); else ctx.lineTo(x3, yy); } ctx.stroke();
+    }
+    // alarm vignette + spark flashes at high sev
+    if (sev > 0.55) {
+      var ap = 0.5 + 0.5 * Math.sin(t * 8);
+      var vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.25, w / 2, h / 2, Math.max(w, h) * 0.7);
+      vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(150,20,25," + (0.25 * ap * sev).toFixed(3) + ")");
+      ctx.fillStyle = vg; ctx.fillRect(0, 0, w, h);
+      if (Math.sin(t * 13) > 0.93) { ctx.fillStyle = "rgba(255,240,200,0.25)"; ctx.fillRect(0, 0, w, h * 0.12); }
+    }
+    ctx.restore();
+  }
+
   root.DN = root.DN || {};
   root.DN.Art = {
     PAL: PAL, rebake: rebake, drawWater: drawWater, drawSonar: drawSonar, drawPortrait: drawPortrait,
     drawCockpit: drawCockpit, gauge: gauge, card: card, glyph: glyph, button: button, overlay: overlay,
     text: text, wrapText: wrapText, rrect: rrect, drawTitle: drawTitle, catColor: catColor, mix: mix,
     drawGrid: drawGrid, drawCell: drawCell, lootGlyph: lootGlyph, numColor: numColor, glowDot: glowDot, textCentered: textCentered,
-    drawForward: drawForward,
+    drawForward: drawForward, drawOxygenTank: drawOxygenTank, drawDepthGauge: drawDepthGauge, drawWarnLamp: drawWarnLamp, drawLeak: drawLeak,
   };
 })(typeof window !== "undefined" ? window : this);
