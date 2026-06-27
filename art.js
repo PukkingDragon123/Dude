@@ -17,6 +17,8 @@
     bone:"#cdc6b2", boneHi:"#efe9d6",
     violet:"#8a6bd6", violetHi:"#c3aeff",
     text:"#cfe6df", textDim:"#6f8a84",
+    // aged-phosphor grade targets (additive; do not change the load-bearing greens)
+    agedWash:"rgba(40,46,30,0.10)", agedTint:"rgba(150,255,170,0.05)", amberBurn:"rgba(224,163,46,0.05)",
   };
 
   function hash(str) { var h = 2166136261; str = String(str);
@@ -32,23 +34,46 @@
   }
 
   // ---------- baked layers (rebuilt on size change) ----------
-  var cache = { w:0, h:0, grain:null, scan:null };
+  var cache = { w:0, h:0, grain:null, grains:null, scan:null, band:null, bandH:0, curve:null };
   function makeCanvas(w,h){ var c=document.createElement("canvas"); c.width=w; c.height=h; return c; }
 
   function rebake(w, h) {
     if (cache.w === w && cache.h === h) return;
     cache.w = w; cache.h = h;
-    // grain: sparse dither speckle
-    var g = makeCanvas(w, h), gx = g.getContext("2d");
-    var img = gx.createImageData(w, h), d = img.data;
-    for (var i=0;i<w*h;i++){ var v = Math.random(); var a = v>0.95?15: v>0.89?7:0; var o=i*4;
-      d[o]=120; d[o+1]=150; d[o+2]=150; d[o+3]=a; }
-    gx.putImageData(img,0,0); cache.grain = g;
-    // scanlines (lighter, every 3px)
+    // animated grain: 3 cycled frames (still cheap)
+    cache.grains = [];
+    for (var f=0; f<3; f++){
+      var g = makeCanvas(w, h), gx = g.getContext("2d");
+      var img = gx.createImageData(w, h), d = img.data;
+      for (var i=0;i<w*h;i++){ var v = Math.random(); var a = v>0.965?20: v>0.90?8:0; var o=i*4;
+        d[o]=120; d[o+1]=150; d[o+2]=140; d[o+3]=a; }
+      gx.putImageData(img,0,0); cache.grains.push(g);
+    }
+    cache.grain = cache.grains[0]; // legacy field (drawWater uses it)
+    // DENSE scanlines: 2px pitch + a faint vertical RGB phosphor stripe (color-CRT feel)
     var s = makeCanvas(w, h), sx = s.getContext("2d");
-    sx.fillStyle = "rgba(0,0,0,0.09)";
-    for (var y=0;y<h;y+=3) sx.fillRect(0,y,w,1);
-    cache.scan = s;
+    sx.fillStyle = "rgba(0,0,0,0.16)";
+    for (var y=0;y<h;y+=2) sx.fillRect(0,y,w,1);
+    sx.globalAlpha = 0.05; sx.fillStyle = "#1aff80";
+    for (var x=0;x<w;x+=3) sx.fillRect(x,0,1,h);
+    sx.globalAlpha = 1; cache.scan = s;
+    // ROLLING refresh band (scrolled vertically each frame in overlay)
+    var bandH = Math.max(60, (h*0.18)|0);
+    var bnd = makeCanvas(w, bandH), bx = bnd.getContext("2d");
+    var bg = bx.createLinearGradient(0,0,0,bandH);
+    bg.addColorStop(0,"rgba(180,255,210,0)"); bg.addColorStop(0.5,"rgba(180,255,210,0.06)"); bg.addColorStop(1,"rgba(180,255,210,0)");
+    bx.fillStyle = bg; bx.fillRect(0,0,w,bandH); cache.band = bnd; cache.bandH = bandH;
+    // CURVATURE + corner vignette mask (bowed-glass tube)
+    var cu = makeCanvas(w, h), cx2 = cu.getContext("2d");
+    var cur = cx2.createRadialGradient(w/2,h/2,Math.min(w,h)*0.30, w/2,h/2,Math.max(w,h)*0.62);
+    cur.addColorStop(0,"rgba(0,0,0,0)"); cur.addColorStop(0.82,"rgba(0,0,0,0.30)"); cur.addColorStop(1,"rgba(0,0,0,0.82)");
+    cx2.fillStyle = cur; cx2.fillRect(0,0,w,h);
+    var corners = [[0,0],[w,0],[0,h],[w,h]];
+    for (var c=0;c<4;c++){ var cc=corners[c];
+      var cg = cx2.createRadialGradient(cc[0],cc[1],0, cc[0],cc[1], Math.min(w,h)*0.22);
+      cg.addColorStop(0,"rgba(0,0,0,0.5)"); cg.addColorStop(1,"rgba(0,0,0,0)");
+      cx2.fillStyle = cg; cx2.fillRect(0,0,w,h); }
+    cache.curve = cu;
   }
 
   // ---------- fog / water background ----------
@@ -409,21 +434,37 @@
     text(ctx, label, r.x+r.w/2, r.y+r.h/2+Math.round(r.h*0.18), Math.min(18, Math.round(r.h*0.42)), opts.disabled?PAL.textDim:(opts.primary?PAL.amberHi:PAL.text), "center");
   }
 
+  // full aged-CRT composite. opts: {scanlines, flash, flashCol, sanity, time, glitch, grade}
   function overlay(ctx, w, h, opts) {
-    opts = opts||{};
-    // vignette
-    var vg = ctx.createRadialGradient(w/2,h/2, Math.min(w,h)*0.42, w/2,h/2, Math.max(w,h)*0.74);
-    vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(0,0,0,0.5)");
-    ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
-    // scanlines
+    opts = opts||{}; var t = opts.time||0, cv = ctx.canvas;
+    // (0) aged-phosphor grade — desaturate/age the whole frame (greens still resolve)
+    if (opts.grade !== false) {
+      ctx.fillStyle = PAL.agedWash; ctx.fillRect(0,0,w,h);
+      ctx.save(); ctx.globalCompositeOperation = "screen"; ctx.fillStyle = PAL.agedTint; ctx.fillRect(0,0,w,h);
+      ctx.globalCompositeOperation = "overlay"; ctx.globalAlpha = 0.5; ctx.fillStyle = PAL.amberBurn; ctx.fillRect(0,0,w,h); ctx.restore();
+    }
+    // (a) baked curvature + corner vignette (bowed tube), then a soft center vignette
+    if (cache.curve) ctx.drawImage(cache.curve, 0, 0, w, h);
+    var vg = ctx.createRadialGradient(w/2,h/2, Math.min(w,h)*0.40, w/2,h/2, Math.max(w,h)*0.74);
+    vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(0,0,0,0.45)"); ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
+    // (b) dense scanlines
     if (opts.scanlines!==false && cache.scan) ctx.drawImage(cache.scan, 0, 0, w, h);
-    // sanity tint (creeping red/violet at low mind)
+    // (c) rolling refresh band (a slow bright bar drifting down the tube)
+    if (opts.scanlines!==false && cache.band) { var by = ((t*42) % (h + cache.bandH)) - cache.bandH;
+      ctx.save(); ctx.globalCompositeOperation="lighter"; ctx.drawImage(cache.band, 0, by, w, cache.bandH); ctx.restore(); }
+    // (d) VHS tracking glitch — rare, brief (game pulses opts.glitch on scares/threat)
+    if (opts.glitch > 0.02) { var gr = srnd(((t*1000)|0) ^ 0x5bd1), slices = 2 + (gr()*4|0);
+      for (var sgl=0; sgl<slices; sgl++){ var sy=gr()*h, sh=3+gr()*18, off=(gr()-0.5)*26*opts.glitch;
+        ctx.drawImage(cv, 0, sy*(cv.height/h), cv.width, sh*(cv.height/h), off, sy, w, sh); }
+      var ty=gr()*h; ctx.fillStyle="rgba(220,255,235,0.10)"; ctx.fillRect(0,ty,w,2);
+      ctx.fillStyle="rgba(0,0,0,0.30)"; ctx.fillRect(0,ty+2,w,1+gr()*6); }
+    // (e) sanity tint (creeping sick violet-red at low mind)
     if (opts.sanity!=null && opts.sanity<0.5){ var a=(0.5-opts.sanity)*0.5;
-      ctx.fillStyle="rgba(120,30,60,"+a*0.5+")"; ctx.fillRect(0,0,w,h); }
-    // damage / event flash
+      ctx.fillStyle="rgba(120,30,60,"+(a*0.5).toFixed(3)+")"; ctx.fillRect(0,0,w,h); }
+    // (f) damage / event flash
     if (opts.flash>0){ ctx.fillStyle="rgba("+(opts.flashCol||"180,40,40")+","+Math.min(0.6,opts.flash)+")"; ctx.fillRect(0,0,w,h); }
-    // grain
-    if (cache.grain){ ctx.globalAlpha=0.13; ctx.drawImage(cache.grain,0,0,w,h); ctx.globalAlpha=1; }
+    // (g) animated grain (cycle 3 baked frames)
+    if (cache.grains){ var gi=((t*18)|0)%3; ctx.globalAlpha=0.085; ctx.drawImage(cache.grains[gi],0,0,w,h); ctx.globalAlpha=1; }
   }
 
   function drawTitle(ctx, w, h, t) {
@@ -1013,6 +1054,54 @@
     ctx.restore();
   }
 
+  // ---------- diegetic RADIO comms readout (the only dive text; aged amber tube) ----------
+  // r={x,y,w,h}; o={ speaker, line, reveal(char count), t, live, sig(0..1) }
+  function drawRadio(ctx, r, o) {
+    o = o || {}; var t = o.t || 0, full = o.line || o.text || "", sig = o.sig == null ? 1 : o.sig, speaker = o.speaker || "КОМАНДА";
+    var col = speaker === "КОМАНДА" ? PAL.amberHi : speaker === "СЕРГЕЙ" ? PAL.phosHi : speaker === "K-219" ? PAL.bio : speaker === "ИСТОЧНИК" ? PAL.violetHi : PAL.textDim;
+    ctx.save();
+    ctx.fillStyle = PAL.steelLo; rrect(ctx, r.x - 4, r.y - 4, r.w + 8, r.h + 8, 5); ctx.fill();
+    ctx.strokeStyle = PAL.steelHi; ctx.lineWidth = 1.5; rrect(ctx, r.x - 4, r.y - 4, r.w + 8, r.h + 8, 5); ctx.stroke();
+    var fg = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h); fg.addColorStop(0, "#10140d"); fg.addColorStop(1, "#06090a");
+    ctx.fillStyle = fg; rrect(ctx, r.x, r.y, r.w, r.h, 3); ctx.fill();
+    ctx.save(); rrect(ctx, r.x, r.y, r.w, r.h, 3); ctx.clip();
+    var nspeck = (6 + (1 - sig) * 70) | 0, nr = srnd(((t * 9) | 0) ^ 0x7a1c); ctx.fillStyle = "rgba(200,230,210,0.4)";
+    for (var n = 0; n < nspeck; n++) ctx.fillRect(r.x + nr() * r.w, r.y + nr() * r.h, 1, 1);
+    var pad = 11, fs = Math.max(9, r.h * 0.19);
+    ctx.font = "bold " + fs + "px 'Courier New', monospace"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    var on = (Math.sin(t * 4) > -0.2) && o.live; glowDot(ctx, r.x + pad + 2, r.y + fs * 0.95, 3.5, on ? col : PAL.steelHi, on ? 1 : 0.4);
+    ctx.fillStyle = col; ctx.fillText("   " + speaker + (sig > 0.5 ? "" : "  [помехи]"), r.x + pad, r.y + fs + 2);
+    var nshow = o.reveal != null ? (o.reveal | 0) : full.length, shown = full.slice(0, nshow), bfs = Math.max(10, r.h * 0.205);
+    ctx.font = "bold " + bfs + "px 'Courier New', monospace";
+    var maxw = r.w - pad * 2, words = shown.split(" "), line = "", yy = r.y + fs + bfs + 7, lh = bfs + 3;
+    function flush(sLine) { ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillText(sLine, r.x + pad + 1, yy + 1); ctx.fillStyle = PAL.text; ctx.fillText(sLine, r.x + pad, yy); yy += lh; }
+    for (var i = 0; i < words.length; i++) { var test = line ? line + " " + words[i] : words[i]; if (ctx.measureText(test).width > maxw && line) { flush(line); line = words[i]; } else line = test; }
+    if (line) flush(line);
+    ctx.globalAlpha = 0.5; ctx.fillStyle = "rgba(0,0,0,0.22)"; for (var sy2 = r.y; sy2 < r.y + r.h; sy2 += 2) ctx.fillRect(r.x, sy2, r.w, 1); ctx.globalAlpha = 1;
+    ctx.restore(); ctx.restore();
+  }
+
+  // ---------- retro title: boot flicker + Cyrillic stencil + recorder OSD stamp ----------
+  function clampF(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function bootFlicker(t, dur) { if (t > dur) return 1; var base = (t / dur) * (t / dur);
+    var flick = (Math.sin(t * 47) * Math.sin(t * 13) > 0.2) ? 1 : 0.15; return clampF(base * (0.5 + 0.5 * flick) + (t > dur * 0.8 ? 0.3 : 0), 0, 1); }
+  function drawTitleStamp(ctx, w, h, t) {
+    var cx = w / 2, boot = bootFlicker(t, 1.3);
+    ctx.save(); ctx.globalAlpha = boot; ctx.textBaseline = "alphabetic";
+    var ts = clampF(w * 0.12, 40, 116); ctx.font = "bold " + ts + "px 'Courier New', monospace"; ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(180,40,40,0.45)"; ctx.fillText("ДРЕДНОУТ", cx - 2, h * 0.27);
+    ctx.fillStyle = "rgba(70,120,255,0.40)"; ctx.fillText("ДРЕДНОУТ", cx + 2, h * 0.27);
+    ctx.fillStyle = PAL.phosHi; ctx.fillText("ДРЕДНОУТ", cx, h * 0.27);
+    ctx.font = "bold " + clampF(w * 0.02, 11, 20) + "px 'Courier New', monospace"; ctx.fillStyle = PAL.bio;
+    ctx.fillText("D R E A D N O U G H T   ·   ГЛУБИНА", cx, h * 0.27 + clampF(w * 0.038, 18, 34)); ctx.restore();
+    ctx.save(); ctx.globalAlpha = boot * 0.85; ctx.font = "bold " + clampF(w * 0.016, 10, 15) + "px 'Courier New', monospace"; ctx.textAlign = "left";
+    var yr = 198 + (((t * 0.2) | 0) % 7); ctx.fillStyle = PAL.amberHi;
+    ctx.fillText("REC ●  " + yr + "-11-04  03:1" + (((t * 1) | 0) % 10) + ":4" + (((t * 9) | 0) % 10), 18, 30);
+    ctx.fillStyle = PAL.amber; ctx.fillText("ГЛУБИНА  −5200 М   ПРОЕКТ «ДРЕДНОУТ»", 18, 50);
+    ctx.fillText("ПИЛОТ: СЕРГЕЙ", 18, 70);
+    ctx.textAlign = "right"; ctx.fillStyle = PAL.amberLo || PAL.amber; ctx.fillText("СССР · СЕВ. ФЛОТ · СЕКРЕТНО", w - 18, h - 18); ctx.restore();
+  }
+
   root.DN = root.DN || {};
   root.DN.Art = {
     PAL: PAL, rebake: rebake, drawWater: drawWater, drawSonar: drawSonar, drawPortrait: drawPortrait,
@@ -1021,6 +1110,6 @@
     drawGrid: drawGrid, drawCell: drawCell, lootGlyph: lootGlyph, numColor: numColor, glowDot: glowDot, textCentered: textCentered,
     drawForward: drawForward, drawOxygenTank: drawOxygenTank, drawDepthGauge: drawDepthGauge, drawWarnLamp: drawWarnLamp, drawLeak: drawLeak,
     drawPlushie: drawPlushie, drawRig: drawRig, drawAngler3D: drawAngler3D, drawBloop3D: drawBloop3D,
-    drawValveWheel: drawValveWheel,
+    drawValveWheel: drawValveWheel, drawRadio: drawRadio, drawTitleStamp: drawTitleStamp, bootFlicker: bootFlicker,
   };
 })(typeof window !== "undefined" ? window : this);

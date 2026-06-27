@@ -25,34 +25,19 @@
     tetherCells: 0,          // 0 = whole grid is the winch reach (the grid IS the tether radius)
   };
 
-  // ---- oil-rig OUTFITTER: equipment upgrades (persistent) bought with banked haul ----
-  var SHOP = [
-    { id: "hull",  name: "Reinforced Hull",  costs: [120, 300, 650],  vals: [130, 165, 200], unit: "max hull", desc: "Welded pressure plating. Survive deeper strikes." },
-    { id: "o2",    name: "O₂ Scrubbers",     costs: [120, 300, 650],  vals: [260, 320, 380], unit: "max air",  desc: "Bigger tanks. More air per descent." },
-    { id: "pings", name: "Sonar Capacitor",  costs: [150, 420],       vals: [4, 5],          unit: "pings/layer", desc: "More sounding charges to deduce at range." },
-    { id: "patch", name: "Patch Kits ×2",    costs: [80],             vals: [2],             unit: "", repeat: true, desc: "Two more hull patches. Seal a leak by hand mid-dive." },
-    { id: "bilge", name: "Bilge Pump",       costs: [260],            vals: [1],             unit: "", desc: "Pumps the cabin: flooding rises far slower." },
-    { id: "light", name: "Floodlight",       costs: [200],            vals: [1],             unit: "", desc: "Brighter beam, quieter rig — the dark sees you less." },
-  ];
+  // (Economy removed — full psychological horror. No shop, no upgrades, no surfacing.
+  //  One way: down to THE SOURCE, or the trench keeps you. Signals now pay AIR + lore.)
 
-  // ---- cute cabin DECORATIONS (cosmetic morale; shown hanging in the cockpit) ----
-  var PLUSHIES = [
-    { id: "duck",  name: "Rubber Duck",      cost: 40, col: "#e0a32e" },
-    { id: "bear",  name: "Teddy Bear",       cost: 55, col: "#b8703a" },
-    { id: "angler",name: "Plush Anglerfish", cost: 70, col: "#46f0c8" },
-    { id: "squid", name: "Plush Squid",      cost: 70, col: "#c3aeff" },
-    { id: "jelly", name: "Plush Jellyfish",  cost: 80, col: "#9cffe6" },
-  ];
-
-  // ---- per-layer grid config (index 1..6). monsters/loot/vents are cell counts. ----
+  // ---- per-layer grid config (index 1..6). monsters/loot/vents are cell counts.
+  //      Fewer, riskier signals now: each SECURE is a real air-vs-danger gamble. ----
   var LAYERS = [
     null,
-    { gw: 7,  gh: 7,  monsters: 6,  loot: 7, vents: 3, depth: 240,  pool: ["angler", "angler", "hagfish"], lootPool: ["data", "data", "data", "artifact"] },
-    { gw: 8,  gh: 8,  monsters: 10, loot: 8, vents: 3, depth: 640,  pool: ["angler", "hagfish", "swimmer"], lootPool: ["data", "data", "artifact"] },
-    { gw: 8,  gh: 8,  monsters: 13, loot: 8, vents: 3, depth: 1200, pool: ["swimmer", "squid", "angler"],   lootPool: ["data", "artifact", "relic"] },
-    { gw: 9,  gh: 9,  monsters: 19, loot: 9, vents: 4, depth: 2100, pool: ["swimmer", "squid", "squid", "bonewhale"], lootPool: ["artifact", "relic", "data"] },
-    { gw: 9,  gh: 9,  monsters: 22, loot: 9, vents: 4, depth: 3400, pool: ["squid", "bonewhale", "bonewhale", "bloop"], lootPool: ["relic", "artifact"] },
-    { gw: 9,  gh: 10, monsters: 20, loot: 8, vents: 5, depth: 5200, pool: ["bonewhale", "bloop", "bloop"], lootPool: ["relic", "artifact"], source: true },
+    { gw: 7,  gh: 7,  monsters: 6,  loot: 2, vents: 3, depth: 240,  pool: ["angler", "angler", "hagfish"], lootPool: ["data", "data", "data", "artifact"] },
+    { gw: 8,  gh: 8,  monsters: 10, loot: 2, vents: 3, depth: 640,  pool: ["angler", "hagfish", "swimmer"], lootPool: ["data", "data", "artifact"] },
+    { gw: 8,  gh: 8,  monsters: 13, loot: 3, vents: 3, depth: 1200, pool: ["swimmer", "squid", "angler"],   lootPool: ["data", "artifact", "relic"] },
+    { gw: 9,  gh: 9,  monsters: 19, loot: 3, vents: 4, depth: 2100, pool: ["swimmer", "squid", "squid", "bonewhale"], lootPool: ["artifact", "relic", "data"] },
+    { gw: 9,  gh: 9,  monsters: 22, loot: 2, vents: 4, depth: 3400, pool: ["squid", "bonewhale", "bonewhale", "bloop"], lootPool: ["relic", "artifact"] },
+    { gw: 9,  gh: 10, monsters: 20, loot: 2, vents: 5, depth: 5200, pool: ["bonewhale", "bloop", "bloop"], lootPool: ["relic", "artifact"], source: true },
   ];
 
   // ---- monsters (the mines). single-cell so the deduction + safe-path guarantee stay clean;
@@ -68,12 +53,13 @@
 
   // ---- loot / cell contents (safe; NOT counted in numbers). ----
   // SIGNALS you intercept (secured via the radar mini-game). `need` = locks required.
+  // No money now: securing a signal vents an AIR cache and decodes a lore transmission.
   var LOOT = {
-    data:     { name: "Faint Signal",     kind: "signal", value: [14, 30],   shape: "signal", need: 2 },
-    artifact: { name: "Encrypted Signal", kind: "signal", value: [80, 170],  shape: "signal", need: 3 },
-    relic:    { name: "Distress Beacon",  kind: "signal", value: [200, 400], shape: "signal", need: 4 },
-    vent:     { name: "Thermal Vent",     kind: "vent",   o2: 34,            shape: "vent" },
-    source:   { name: "THE SOURCE",       kind: "source", value: [0, 0],     shape: "anomaly" },
+    data:     { name: "Faint Signal",     kind: "signal", o2: 30, shape: "signal", need: 2 },
+    artifact: { name: "Encrypted Signal", kind: "signal", o2: 55, shape: "signal", need: 3 },
+    relic:    { name: "Distress Beacon",  kind: "signal", o2: 85, shape: "signal", need: 4 },
+    vent:     { name: "Thermal Vent",     kind: "vent",   o2: 34,                shape: "vent" },
+    source:   { name: "THE SOURCE",       kind: "source", o2: 0,                 shape: "anomaly" },
   };
 
   var LORE = [
@@ -85,12 +71,102 @@
     "It is not a beacon and not a creature. It is a door — and it has been knocking.",
   ];
 
+  // ---- RADIO: the only voice down here. Command up top; static, the dead crew of K-219,
+  //      and THE SOURCE (wearing Sergey's own voice) below. Carries the tutorial + the lore. ----
+  var RADIO = {
+    briefing: [
+      { speaker: "КОМАНДА", line: "Волков. Comrade Volkov. Comms check — do you read?" },
+      { speaker: "СЕРГЕЙ",  line: "Da. DN-7 reads. Air is green. I'm at the thermocline." },
+      { speaker: "КОМАНДА", line: "Below you is the pulse. Every nine seconds. From under the floor." },
+      { speaker: "КОМАНДА", line: "K-219 went down to it. Forty-one men. Her log ends mid-word." },
+      { speaker: "КОМАНДА", line: "Find the Source. That is the mission. The Motherland watches." },
+      { speaker: "КОМАНДА", line: "The cable is cut at the cline. No winch back. Understood?" },
+      { speaker: "СЕРГЕЙ",  line: "...Understood. There is no turning back." },
+      { speaker: "КОМАНДА", line: "Then descend. God keep you. We cannot." }
+    ],
+    tutorial: {
+      idle:        { speaker: "КОМАНДА", line: "That screen is your sonar. The lit cell is you. DRIVE — one cell." },
+      firstDrive:  { speaker: "КОМАНДА", line: "Good. Entering a cell shows what swims beside it." },
+      firstNumber: { speaker: "КОМАНДА", line: "A number = anglers in the eight tiles around it. Read it. Deduce." },
+      firstPing:   { speaker: "КОМАНДА", line: "PING sounds the dark ahead without moving. But it is LOUD." },
+      firstFlag:   { speaker: "СЕРГЕЙ",  line: "Marked it. The boat won't drive a flag unless I insist." },
+      firstMove:   { speaker: "КОМАНДА", line: "...the contact moved. They don't hold still down here. Re-read." },
+      onSignal:    { speaker: "КОМАНДА", line: "A signal. SECURE it — lock the dial. It buys air. And answers." },
+      lowAir:      { speaker: "КОМАНДА", line: "Air's low, Volkov. Find a vent, or the screen goes dark." },
+      foundHatch:  { speaker: "КОМАНДА", line: "The descent hatch. Reach it, then CRANK the valve to go down." },
+      firstCrank:  { speaker: "КОМАНДА", line: "Wheel's turning. Down you go. We'll be here." }
+    },
+    layer: {
+      1: [ { speaker: "СЕРГЕЙ", line: "240 metres. Light still reaches. Still feels like the sea." } ],
+      2: [ { speaker: "КОМАНДА", line: "Six forty metres. Pressure climbing. Signal's [помехи]... holding." },
+           { speaker: "СЕРГЕЙ",  line: "The pulse is louder than my own heart now." } ],
+      3: [ { speaker: "КОМАНДА", line: "...Volkov, repeat — [помехи] — say again your dep—" },
+           { speaker: "K-219",   line: "...this is K-219... do not answer the bell... do not..." },
+           { speaker: "СЕРГЕЙ",  line: "That was a Russian voice. K-219 sank in '86." } ],
+      4: [ { speaker: "КОМАНДА", line: "[помехи] ...Sergey... are you... [помехи] ...alone down..." },
+           { speaker: "K-219",   line: "We turned the valve. We all turned the valve. It opened." },
+           { speaker: "СЕРГЕЙ",  line: "Forty-one names on the hull outside my window. I counted." } ],
+      5: [ { speaker: "ИСТОЧНИК", line: "СЕРГЕЙ. (Sergey.) — in his own voice." },
+           { speaker: "K-219",    line: "It learns the voice. Then it wears it. Then you answer." },
+           { speaker: "СЕРГЕЙ",   line: "Command stopped replying at 3000. I keep talking anyway." } ],
+      6: [ { speaker: "ИСТОЧНИК", line: "Ты почти дома. (You are almost home.)" },
+           { speaker: "ИСТОЧНИК", line: "The door was never locked, Sergey. You were." },
+           { speaker: "СЕРГЕЙ",   line: "...Da. Da. I'm coming down. There was never any back." } ]
+    },
+    signals: [
+      { speaker: "[помехи]", line: "\"...сорок один. forty-one. all accounted for. all... down here.\"" },
+      { speaker: "[помехи]", line: "\"depth log K-219: the floor has a pulse. the floor has a do—\"" },
+      { speaker: "[помехи]", line: "\"tell my wife the ice — [помехи] — tell her I went quiet.\"" },
+      { speaker: "[помехи]", line: "\"it is not sonar. it is breathing. nine seconds. in. out.\"" },
+      { speaker: "[помехи]", line: "\"we drilled the floor and the floor blinked.\"" },
+      { speaker: "[помехи]", line: "\"do not flag the dark. it sees the flag. it moves.\"" },
+      { speaker: "[помехи]", line: "\"Москва, this is K-219. we are not sinking. we are being let in.\"" },
+      { speaker: "[помехи]", line: "\"the last man kept the valve warm for whoever came after.\"" },
+      { speaker: "[помехи]", line: "\"Sergey. it spelled your name in the static before you launched.\"" },
+      { speaker: "[помехи]", line: "\"air is a leash. when it ends, you stay. we all stayed.\"" },
+      { speaker: "[помехи]", line: "\"the Bloop is not the monster. it is the lock. you are the key.\"" },
+      { speaker: "[помехи]", line: "\"...home. home. home. home. ho—\" [signal lost]" }
+    ],
+    ambient: {
+      move: [
+        { speaker: "СЕРГЕЙ",   line: "It's not where I left it." },
+        { speaker: "СЕРГЕЙ",   line: "Something just changed on the glass." },
+        { speaker: "K-219",    line: "They only move when you stop looking." },
+        { speaker: "[помехи]", line: "...closer... [помехи]" }
+      ],
+      nearMiss: [
+        { speaker: "СЕРГЕЙ",   line: "It's against the hull. I can hear it breathe." },
+        { speaker: "K-219",    line: "Run silent. Run silent. Run sil—" },
+        { speaker: "ИСТОЧНИК", line: "One cell. Один. So close, Sergey." }
+      ],
+      threat: [
+        { speaker: "КОМАНДА",  line: "[помехи] you're making noise — they're awake — [помехи]" },
+        { speaker: "СЕРГЕЙ",   line: "Too loud. I was too loud." }
+      ],
+      deepIdle: [
+        { speaker: "СЕРГЕЙ",   line: "The pressure presses my thoughts flat." },
+        { speaker: "ИСТОЧНИК", line: "Why have you stopped? Keep coming down." },
+        { speaker: "K-219",    line: "Don't sit still. Sitting still is how it finds the face." }
+      ]
+    },
+    source: [
+      { speaker: "ИСТОЧНИК", line: "Здравствуй. (Hello.) I have your voice now." },
+      { speaker: "ИСТОЧНИК", line: "Turn the wheel. The crew is so glad you came." },
+      { speaker: "СЕРГЕЙ",   line: "For the Motherland. For K-219. ...For nothing. Crank." }
+    ],
+    win:       { speaker: "ИСТОЧНИК", line: "Добро пожаловать домой, Сергей. Welcome home." },
+    deathHull: { speaker: "СЕРГЕЙ",   line: "Seam's gone — water — [помехи] — tell them I reached—" },
+    deathAir:  [ { speaker: "СЕРГЕЙ", line: "No air. The ping keeps sweeping for... no one." },
+                 { speaker: "K-219",  line: "Now you stay. Now you keep the valve warm." } ],
+    seal:      { speaker: "КОМАНДА", line: "Clang. Hatch sealed. No way up now, Sergey. Only down." },
+    noway:     { speaker: "СЕРГЕЙ",  line: "There's no surface to run to. Find the hatch. Go down." }
+  };
+
   root.DN = root.DN || {};
   root.DN.CFG = CFG;
   root.DN.LAYERS = LAYERS;
   root.DN.MONSTERS = MONSTERS;
   root.DN.LOOT = LOOT;
-  root.DN.SHOP = SHOP;
-  root.DN.PLUSHIES = PLUSHIES;
   root.DN.LORE = LORE;
+  root.DN.RADIO = RADIO;
 })(typeof window !== "undefined" ? window : this);

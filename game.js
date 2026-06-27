@@ -5,7 +5,7 @@
  * Depends (load order): strings.js, rng.js, data.js, audio.js, art.js. */
 (function () {
   "use strict";
-  var CFG = DN.CFG, LAYERS = DN.LAYERS, MON = DN.MONSTERS, LOOT = DN.LOOT, LORE = DN.LORE, SHOP = DN.SHOP, PLUSHIES = DN.PLUSHIES;
+  var CFG = DN.CFG, LAYERS = DN.LAYERS, MON = DN.MONSTERS, LOOT = DN.LOOT, LORE = DN.LORE, RADIO = DN.RADIO;
   var Art = DN.Art, Audio = DN.Audio, S = window.STR, PAL = Art.PAL;
 
   var OPT = { sound: true, shake: true, scanlines: true };
@@ -103,8 +103,9 @@
   var OFF = { x: -99999, y: -99999, w: 0, h: 0 };
   function layoutStations() {
     var c = G.cam;
-    // render-only idle breathing sway (never persisted) so the cabin is never frozen
-    if (c.active < 0.05 && !G.lock && !G.scare) { c._swayY = Math.sin(c.idle) * 0.012; c._swayP = Math.sin(c.idle * 0.77 + 1.3) * 0.009; }
+    // render-only idle breathing sway (never persisted); amplifies as sanity frays — the cabin breathes wrong
+    if (c.active < 0.05 && !G.lock && !G.scare) { var amp = G.sanity < 0.4 ? (1 + (0.4 - G.sanity) * 4) : 1;
+      c._swayY = Math.sin(c.idle) * 0.012 * amp; c._swayP = Math.sin(c.idle * 0.77 + 1.3) * 0.009 * amp; }
     else { c._swayY = 0; c._swayP = 0; }
     for (var k in STA) { var S = STA[k]; var pr = camProject(S.a[0], S.a[1], S.a[2]); S.scr = pr; S.mul = pr.visible ? pr.scale / S.restScale : 0; }
     function rectOf(S) { if (!S.scr.visible) return { x: OFF.x, y: OFF.y, w: 0, h: 0 }; var w = S.rw * S.mul, h = S.rh * S.mul; return { x: S.scr.sx - w / 2, y: S.scr.sy - h / 2, w: w, h: h }; }
@@ -146,8 +147,8 @@
   function updatePassby(s) { // sneaky, rare when safe, more frequent when hunted; one at a time
     if (G.passby) { G.passby.t += s; if (G.passby.t >= G.passby.dur) G.passby = null; return; }
     G.passT -= s; if (G.passT > 0) return;
-    var nd = nearestMonDist(), danger = clamp((G.threat / 100) * 0.6 + (nd <= 3 ? (4 - nd) / 4 * 0.8 : 0), 0, 1);
-    if (G.rng.chance(danger * 0.8)) spawnPassby(false);
+    var nd = nearestMonDist(), danger = clamp((G.threat / 100) * 0.6 + (nd <= 3 ? (4 - nd) / 4 * 0.8 : 0) + (1 - G.sanity) * 0.5, 0, 1);
+    if (G.rng.chance(danger * 0.8)) spawnPassby(false); // low sanity -> more phantom contacts at the glass
     G.passT = G.rng.range(2.6, 6.5) - danger * 3;
   }
 
@@ -157,28 +158,46 @@
     var rng = new RNG(seed);
     G = { scene: "titlemenu", seedStr: rng.seedStr, rng: rng, time: 0,
       layer: 1, gw: 7, gh: 7, cells: [], sub: { cx: 0, cy: 0 }, facing: { dx: 0, dy: 1 },
-      hull: CFG.startHull, oxygen: CFG.startOxygen, pings: CFG.pingsStart, threat: 0, haul: 0, depth: 0,
-      money: 0, up: { hull: 0, o2: 0, pings: 0, bilge: 0, light: 0 }, patches: CFG.startPatches, plushies: [], onLoot: false, portMsg: "", portMsgT: 0, shopFocus: 0,
+      hull: CFG.startHull, oxygen: CFG.startOxygen, pings: CFG.pingsStart, threat: 0, depth: 0,
+      patches: CFG.startPatches, onLoot: false,
       lightOn: false, transit: null, stalker: null, woke: false, confirmDir: null,
       leak: 0, scare: null, snow: [], flash: 0, flashCol: "180,40,40", shake: 0, hbT: 0, heartbeat: 0,
       lamp: { o2: 0, hull: 0, wake: 0 }, endKind: null, won: false, menuSel: 0, padActive: false,
       hatch: { x: 0, y: 0 }, start: { x: 0, y: 0 }, loreSeen: [], pingFlash: 0, sweep: 0,
+      // full-horror state: sanity ("the dark notices you"), CRT glitch pulse, the radio, idle clock
+      sanity: 1, glitch: 0, radio: null, idleT: 0, srcSaid: false,
       // look-around camera (eased yaw/pitch); shake is NEVER written here (kept transient in render)
       cam: { yaw: 0, pitch: 0, vYaw: 0, vPitch: 0, tgtYaw: 0, tgtPitch: 0, idle: 0, active: 0, lastLook: -9, _swayY: 0, _swayP: 0 },
       passby: null, passT: 4, valveAngle: 0, valveSpin: 0, leakStep: 0 };
+    radioInit();
   }
   function fmt(t, o) { return String(t).replace(/\{(\w+)\}/g, function (m, key) { return o && o[key] != null ? o[key] : ""; }); }
   function cell(x, y) { return (x < 0 || y < 0 || x >= G.gw || y >= G.gh) ? null : G.cells[y * G.gw + x]; }
   function curCell() { return cell(G.sub.cx, G.sub.cy); }
-  function shopItem(id) { for (var i = 0; i < SHOP.length; i++) if (SHOP[i].id === id) return SHOP[i]; return null; }
-  function shopVal(id, lvl) { var it = shopItem(id); return it.vals[lvl - 1]; }
-  function effMaxHull() { return G.up.hull ? shopVal("hull", G.up.hull) : CFG.maxHull; }
-  function effMaxOxygen() { return G.up.o2 ? shopVal("o2", G.up.o2) : CFG.startOxygen; }
-  function effPings() { return G.up.pings ? shopVal("pings", G.up.pings) : CFG.pingsStart; }
-  function lightRange() { return G.up.light ? 44 : 30; }
-  function lightThreatRate() { return CFG.threatLight * (G.up.light ? 0.5 : 1); }
-  function bilgeMult() { return G.up.bilge ? 0.62 : 1; }
-  function portMsg(m) { G.portMsg = m; G.portMsgT = 2.6; }
+  // fixed stats (no upgrades). Kept as functions so every call site stays unchanged.
+  function effMaxHull() { return CFG.maxHull; }
+  function effMaxOxygen() { return CFG.startOxygen; }
+  function effPings() { return CFG.pingsStart; }
+  function lightRange() { return 30; }
+  function lightThreatRate() { return CFG.threatLight; }
+  function bilgeMult() { return 1; }
+
+  // ---------------- RADIO: the only voice down here (tutorial + lore + dread) ----------------
+  function radioInit() { G.radio = { cur: null, t: 0, q: [], fired: {}, sigSeen: [], ambCool: 0 }; }
+  function radioHold(line) { return Math.max(3.0, Math.min(7, 1.6 + line.length * 0.05)); }
+  function radioQueue(m) { if (!m || !G.radio) return; G.radio.q.push({ speaker: m.speaker, line: m.line, hold: radioHold(m.line) }); }
+  function radioQueueAll(a) { if (!a) return; for (var i = 0; i < a.length; i++) radioQueue(a[i]); }
+  function radioOnce(key, m) { if (G.radio && !G.radio.fired[key]) { G.radio.fired[key] = true; radioQueue(m); } }
+  function radioTutorial(key) { if (G.layer === 1) radioOnce("tut_" + key, RADIO.tutorial[key]); }
+  function radioAmbient(bucket, chance, minLayer) { var R = G.radio; if (!R || G.layer < (minLayer || 1) || R.ambCool > 0) return;
+    if (!G.rng.chance(chance)) return; var pool = RADIO.ambient[bucket]; if (!pool || !pool.length) return; radioQueue(pool[G.rng.int(0, pool.length - 1)]); R.ambCool = 16; }
+  function radioSignal() { var R = G.radio; if (!R) return; var idx = [], i;
+    for (i = 0; i < RADIO.signals.length; i++) if (R.sigSeen.indexOf(i) < 0) idx.push(i);
+    if (!idx.length) idx = [G.rng.int(0, RADIO.signals.length - 1)];
+    var pick = idx[G.rng.int(0, idx.length - 1)]; R.sigSeen.push(pick); radioQueue(RADIO.signals[pick]); }
+  function radioUpdate(s) { var R = G.radio; if (!R) return; if (R.ambCool > 0) R.ambCool -= s;
+    if (!R.cur && R.q.length) { R.cur = R.q.shift(); R.t = 0; if (Audio.scan) Audio.scan(); }
+    if (R.cur) { R.t += s; if (R.t >= R.cur.hold) { R.cur = null; if (R.q.length) { R.cur = R.q.shift(); R.t = 0; if (Audio.scan) Audio.scan(); } } } }
 
   // ---------------- layer generation (first 3x3 safe + carved monster-free path to hatch) ----------------
   function genLayer(layer) {
@@ -248,18 +267,25 @@
     }
     if (moved) { recomputeNumbers(); G.lamp.wake = Math.max(G.lamp.wake, 0.7); Audio.alert(); G.flash = Math.max(G.flash, 0.16); G.flashCol = "120,40,160";
       if (OPT.shake) G.shake = Math.max(G.shake, 4.5); // the creatures shifting thumps the hull
-      if (!G.passby && nearestMonDist() <= 3) spawnPassby(true); } // and one darts past the glass
+      var nd = nearestMonDist();
+      if (!G.passby && nd <= 3) spawnPassby(true); // and one darts past the glass
+      radioTutorial("firstMove"); radioAmbient(nd === 1 ? "nearMiss" : "move", nd === 1 ? 0.4 : 0.25, 2); }
     return moved;
   }
 
-  function startRun() { G.layer = 1; G.hull = effMaxHull(); G.oxygen = effMaxOxygen(); G.haul = 0; G.threat = 0; G.lightOn = false; G.leak = 0; G.leakStep = 0; G.scare = null; G.won = false; G.endKind = null;
+  function startRun() { G.layer = 1; G.hull = effMaxHull(); G.oxygen = effMaxOxygen(); G.threat = 0; G.lightOn = false; G.leak = 0; G.leakStep = 0; G.scare = null; G.won = false; G.endKind = null;
+    G.sanity = 1; G.glitch = 0; G.idleT = 0; G.srcSaid = false; G.patches = CFG.startPatches; G.loreSeen = [];
     G.passby = null; G.passT = 4; G.valveAngle = 0; G.valveSpin = 0;
     G.cam.yaw = G.cam.pitch = G.cam.vYaw = G.cam.vPitch = G.cam.tgtYaw = G.cam.tgtPitch = 0; G.cam.active = 0; // each dive starts facing the window
-    genLayer(1); G.scene = "dive"; Audio.setMusic("ambient"); }
-  function descend() { Audio.descend(); if (OPT.shake) G.shake = 6; var nl = G.layer + 1; if (nl > CFG.layers) { winRun(); return; } genLayer(nl); G.threat = clamp(G.threat - 20, 0, 100); }
-  function surface() { if (G.scene !== "dive") return; G.money += G.haul; G.haul = 0; Audio.ascend(); G.scene = "rig"; Audio.setMusic("none"); }
-  function winRun() { G.money += G.haul; G.scene = "end"; G.won = true; G.endKind = "win"; Audio.setMusic("none"); Audio.win(); }
-  function die(kind) { if (G.scene !== "dive") return; G.scene = "end"; G.won = false; G.endKind = kind; Audio.setMusic("none"); Audio.lose(); }
+    radioInit(); genLayer(1); G.scene = "dive"; Audio.setMusic("ambient");
+    radioQueueAll(RADIO.briefing); radioQueueAll(RADIO.layer[1]); }
+  function descend() { Audio.descend(); if (OPT.shake) G.shake = 8; var nl = G.layer + 1; if (nl > CFG.layers) { winRun(); return; }
+    radioTutorial("firstCrank"); radioQueue(RADIO.seal); G.flash = Math.max(G.flash, 0.4); G.flashCol = "120,160,170";
+    genLayer(nl); G.threat = clamp(G.threat - 20, 0, 100); G.sanity = clamp(G.sanity + 0.08, 0, 1); G.srcSaid = false;
+    radioQueueAll(RADIO.layer[nl] || RADIO.layer[CFG.layers]); }
+  function winRun() { G.scene = "end"; G.won = true; G.endKind = "win"; Audio.setMusic("none"); Audio.win(); radioQueue(RADIO.win); }
+  function die(kind) { if (G.scene !== "dive") return; G.scene = "end"; G.won = false; G.endKind = kind; Audio.setMusic("none"); Audio.lose();
+    if (kind === "hull") radioQueue(RADIO.deathHull); else radioQueueAll(RADIO.deathAir); }
 
   // ---------------- actions ----------------
   function tryDrive(dx, dy) {
@@ -277,20 +303,25 @@
     if (c.mon) { strike(c); afterMove(); return; }
     G.sub = { cx: c.x, cy: c.y };
     seeCell(c);
+    radioTutorial("firstDrive"); if (c.n > 0) radioTutorial("firstNumber");
     if (c.lootId && !c.collected && c.kind === "vent") collect(c);       // thermal air is automatic
-    G.onLoot = !!(c.lootId && !c.collected && c.kind !== "vent");        // data/artifacts await EXCAVATE
+    G.onLoot = !!(c.lootId && !c.collected && c.kind !== "vent");        // signals await SECURE
+    if (G.onLoot) radioTutorial("onSignal");
     afterMove();
   }
   function afterMove() {
+    G.idleT = 0;
     G.threat = clamp(G.threat + CFG.threatMove, 0, 100);
     moveAnglers();
     if (G.oxygen <= 0) { G.oxygen = 0; return die("oxygen"); }
     if (G.hull <= 0) return die("hull");
   }
-  function collect(c) { // c is a vent (auto) or a secured signal
+  function collect(c) { // c is a vent (auto) or a secured signal — both now vent AIR (no money)
     c.collected = true;
-    if (c.kind === "vent") { G.oxygen = clamp(G.oxygen + c.o2, 0, effMaxOxygen() + 40); G.lamp.o2 = 0; Audio.vent(); G.flash = 0.2; G.flashCol = "40,240,170"; }
-    else { G.haul += c.value; Audio.good(); G.flash = 0.28; G.flashCol = "224,163,46"; }
+    var air = (LOOT[c.lootId] && LOOT[c.lootId].o2) || c.o2 || 34;
+    G.oxygen = clamp(G.oxygen + air, 0, effMaxOxygen() + 40); G.lamp.o2 = 0;
+    if (c.kind === "vent") { Audio.vent(); G.flash = 0.2; G.flashCol = "40,240,170"; }
+    else { Audio.good(); G.flash = 0.28; G.flashCol = "224,163,46"; G.sanity = clamp(G.sanity + 0.06, 0, 1); }
   }
   // SECURE: start the radar mini-game to lock a signal that a warship is jamming
   function secure() {
@@ -309,7 +340,7 @@
       if (lk.hits >= lk.need) lockSuccess(); }
     else { lk.spd += 0.22; G.threat = clamp(G.threat + 5, 0, 100); Audio.alert(); }
   }
-  function lockSuccess() { var c = cell(G.lock.cx, G.lock.cy); if (c) collect(c); G.haul += 0; G.onLoot = false; G.threat = clamp(G.threat + 8, 0, 100); G.lock = null; }
+  function lockSuccess() { var c = cell(G.lock.cx, G.lock.cy); if (c) collect(c); radioSignal(); G.onLoot = false; G.threat = clamp(G.threat + 8, 0, 100); G.lock = null; }
   function lockFail() { G.lock = null; G.threat = clamp(G.threat + 22, 0, 100); G.lamp.wake = 1; Audio.alert(); moveAnglers(); }
   function patch() { // hands-on leak repair
     if (G.scene !== "dive" || G.transit || G.lock || G.scare) return;
@@ -319,13 +350,12 @@
     G.leak = (1 - G.hull / effMaxHull()) * bilgeMult();
     Audio.vent(); G.flash = 0.2; G.flashCol = "40,240,170";
   }
-  function crank() { // the winch: descend on the hatch, breach on the Source, otherwise reel UP to the rig
+  function crank() { // the winch: breach on the Source, descend on the hatch — NEVER surfaces (no way back)
     if (G.scene !== "dive" || G.transit || G.scare) return; var c = curCell();
     if (G.lock) return;
-    G.valveSpin = (c && c.hatch) ? 9 : (c && c.source) ? 9 : -7; // visual: spin the wheel
-    if (c && c.source) { winRun(); return; }
-    if (c && c.hatch) { descend(); return; }
-    surface();
+    if (c && c.source) { G.valveSpin = 9; winRun(); return; }
+    if (c && c.hatch) { G.valveSpin = 9; descend(); return; }
+    G.valveSpin = -7; Audio.alert(); radioQueue(RADIO.noway); // denied — there is no surface to return to
   }
   function strike(c) {
     var def = MON[c.monId], dmg = G.rng.int(def.dmg[0], def.dmg[1]);
@@ -333,6 +363,7 @@
     c.seen = true; c.triggered = true; c.flagged = true; // sub is shoved back; the cell is now KNOWN + flagged
     G.flash = 0.8; G.flashCol = "190,30,30"; if (OPT.shake) G.shake = def.tier >= 3 ? 16 : 11;
     G.lamp.hull = 1; Audio.roar(); Audio.damage();
+    G.glitch = 0.9; G.sanity = clamp(G.sanity - 0.12, 0, 1); // the strike tears the tube and the mind
     G.scare = { shape: def.shape, name: def.name, until: G.time + (def.tier >= 3 ? 1.6 : 1.1), t0: G.time, tier: def.tier };
     Audio.setMusic("threat");
   }
@@ -344,12 +375,12 @@
       var cx = G.sub.cx + fx * d - fy * l, cy = G.sub.cy + fy * d + fx * l; var c = cell(cx, cy);
       if (c && !c.mon && !c.seen) seeCell(c); // ping reveals numbers of SAFE cells only; monsters stay fog (deduce them)
     } }
-    Audio.ping();
+    Audio.ping(); radioTutorial("firstPing");
     if (G.threat >= CFG.wake) moveAnglers(); // a loud ping makes the Anglers shift
   }
   function toggleLight() { if (G.scene !== "dive" || G.lock) return; Audio.init(); G.lightOn = !G.lightOn; Audio.vent(); }
   function flagFaced() { if (G.scene !== "dive" || G.transit || G.lock) return; var c = cell(G.sub.cx + G.facing.dx, G.sub.cy + G.facing.dy); flagCell(c); }
-  function flagCell(c) { if (!c || c.seen) return; c.flagged = !c.flagged; G.confirmDir = null; Audio.card(); }
+  function flagCell(c) { if (!c || c.seen) return; c.flagged = !c.flagged; G.confirmDir = null; Audio.card(); if (c.flagged) radioTutorial("firstFlag"); }
 
   // (the old "stalker" hunter is replaced by moveAnglers(): the mines themselves relocate.)
 
@@ -359,6 +390,8 @@
     if (G.flash > 0) G.flash = Math.max(0, G.flash - dt / 600);
     if (G.shake > 0) G.shake = Math.max(0, G.shake - dt / 60);
     if (G.pingFlash > 0) G.pingFlash = Math.max(0, G.pingFlash - s * 1.3);
+    radioUpdate(s);                                              // the radio drips its queue (all scenes)
+    if (G.glitch > 0) { G.glitch -= s * 4; if (G.glitch < 0) G.glitch = 0; } // CRT tear decays
     G.sweep = (G.sweep + s * 2.2) % (Math.PI * 2);
     for (var key in G.lamp) if (G.lamp[key] > 0) G.lamp[key] = Math.max(0, G.lamp[key] - s * 0.4);
     if (G.scare && G.time > G.scare.until) G.scare = null;
@@ -394,6 +427,23 @@
     var nd = nearestMonDist(); var hbScare = nd <= 3 ? clamp(1 - (nd - 1) / 3, 0, 1) : 0;
     G.heartbeat = Math.max(hbScare, G.leak > 0.7 ? G.leak : 0, G.oxygen < effMaxOxygen() * 0.12 ? 0.6 : 0);
     if (G.heartbeat > 0.06) { var iv = 1.1 - G.heartbeat * 0.7; G.hbT -= s; if (G.hbT <= 0) { G.hbT = iv; Audio.heartbeat(G.heartbeat); } } else G.hbT = 0;
+    // RADIO cadence: layer-1 tutorial beats, threat warnings, the deep-idle whispers
+    G.idleT += s;
+    if (G.layer === 1) {
+      if (G.idleT > 4) radioTutorial("idle");
+      if (G.oxygen < effMaxOxygen() * 0.25) radioTutorial("lowAir");
+      var hcl = cell(G.hatch.x, G.hatch.y);
+      if (hcl && (hcl.seen || Math.abs(G.hatch.x - G.sub.cx) + Math.abs(G.hatch.y - G.sub.cy) === 1)) radioTutorial("foundHatch");
+    }
+    if (G.threat >= CFG.wake) radioAmbient("threat", 0.30, 1);
+    if (G.idleT > 12) { radioAmbient("deepIdle", 0.5, 4); G.idleT = 0; }
+    // THE SOURCE speaks when you reach the floor
+    var occ = curCell(); if (occ && occ.source && !G.srcSaid) { G.srcSaid = true; radioQueueAll(RADIO.source); }
+    // SANITY — "the dark notices you" (never lethal; only corrupts perception)
+    var drain = 0.004 + (!G.lightOn && G.depth > 1000 ? 0.004 : 0) + (nd <= 2 ? 0.012 : 0) + (G.oxygen < effMaxOxygen() * 0.15 ? 0.010 : 0);
+    G.sanity = clamp(G.sanity - drain * s, 0, 1);
+    if (G.sanity < 0.30 && G.rng.chance(0.4 * s)) { Audio.heartbeat(0.5); G.flash = Math.max(G.flash, 0.10); G.flashCol = "120,40,160"; }
+    if (G.rng.chance(0.05 * s)) G.glitch = Math.max(G.glitch, 0.4); // the comms feed pops unreliably
     // ambient groan/drip when flooding & quiet
     if (G.leak > 0.25 && Math.sin(G.time * 0.7) > 0.995) Audio.groan && Audio.groan();
     var wantThreat = G.threat >= CFG.wake || nd <= 2 || G.leak > 0.6;
@@ -406,7 +456,6 @@
     if (UI.overlay === "help") return renderHelp();
     if (UI.overlay === "options") return renderOptions();
     if (G.scene === "dive") return renderDive();
-    if (G.scene === "rig") return renderRig();
     if (G.scene === "end") return renderEnd();
     return renderTitle();
   }
@@ -510,7 +559,7 @@
       ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, ph.x, ph.y, ph.w, ph.h);
       if (G.passby) drawPassby(G.passby, ph);
       ctx.restore();
-      portholeBezel(ph); drawCabinPlushies();
+      portholeBezel(ph);
     }
     drawMonitor();
     if (G.lock) drawLock();
@@ -521,11 +570,20 @@
     if (vc && vc.visible) { var oc0 = curCell(); Art.drawValveWheel(ctx, vc.sx, vc.sy, STA.valve.rr * STA.valve.mul, { ang: G.valveAngle, t: G.time, lit: G.lightOn ? 1 : 0.7, active: !!(oc0 && (oc0.hatch || oc0.source)) }); }
     drawLamps(); drawControls();
     ctx.restore();
-    // jumpscare / flooding / grain are screen-space (no camera, no shake transform)
+    // jumpscare / flooding / radio / grain are screen-space (no camera, no shake transform)
     if (G.scare) drawScare();
     else Art.drawLeak(ctx, W, H, clamp(G.leak, 0, 1), G.time);
-    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, flash: G.flash, flashCol: G.flashCol });
+    if (!G.scare) drawRadioPanel();   // the only dive text — diegetic comms, beneath the CRT grade
+    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, flash: G.flash, flashCol: G.flashCol, sanity: G.sanity, time: G.time, glitch: G.glitch });
     if (G.heartbeat > 0.25) { ctx.fillStyle = "rgba(150,20,30," + (G.heartbeat * 0.16).toFixed(3) + ")"; ctx.fillRect(0, 0, W, H); }
+  }
+  // screen-fixed comms readout (drawn beneath the CRT grade so it reads as a tube)
+  function drawRadioPanel() {
+    var R = G.radio; if (!R || !R.cur) return;
+    var w = clamp(W * 0.62, 280, 760), x = (W - w) / 2, h = clamp(H * 0.10, 52, 86), y = clamp(H * 0.022, 8, 22);
+    var sig = clamp(1 - G.threat / 130, 0.25, 1) * (G.sanity < 0.5 ? 0.55 + G.sanity : 1);
+    var reveal = clamp(R.t * 32, 0, R.cur.line.length);
+    Art.drawRadio(ctx, { x: x, y: y, w: w, h: h }, { speaker: R.cur.speaker, line: R.cur.line, reveal: reveal, t: G.time, live: true, sig: sig });
   }
 
   function drawCockpitBG() {
@@ -541,12 +599,6 @@
     ctx.lineWidth = 7; ctx.strokeStyle = PAL.steelLo; Art.rrect(ctx, ph.x - 3, ph.y - 3, ph.w + 6, ph.h + 6, 12); ctx.stroke();
     ctx.lineWidth = 2; ctx.strokeStyle = PAL.steelHi; Art.rrect(ctx, ph.x - 5, ph.y - 5, ph.w + 10, ph.h + 10, 14); ctx.stroke();
     ctx.fillStyle = PAL.rivet; var n = 8; for (var i = 0; i <= n; i++) { var t = i / n; ctx.beginPath(); ctx.arc(ph.x + ph.w * t, ph.y - 8, 2, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(ph.x + ph.w * t, ph.y + ph.h + 8, 2, 0, 7); ctx.fill(); }
-  }
-  function plushDef(id) { for (var i = 0; i < PLUSHIES.length; i++) if (PLUSHIES[i].id === id) return PLUSHIES[i]; return null; }
-  function drawCabinPlushies() {
-    if (!G.plushies.length) return; var ph = L.porthole, n = G.plushies.length;
-    var sz = clamp(Math.min(ph.h * 0.12, ph.w / (n + 1) * 0.45), 8, 22);
-    for (var i = 0; i < n; i++) { var pl = plushDef(G.plushies[i]); if (!pl) continue; Art.drawPlushie(ctx, ph.x + ph.w * ((i + 1) / (n + 1)), ph.y + sz * 1.9, sz, pl.id, pl.col, G.time); }
   }
 
   function drawMonitor() {
@@ -639,13 +691,13 @@
   // ---------------- title / help / options / end ----------------
   function renderSceneBackground() { var bw = buf.width, bh = buf.height; bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.clearRect(0, 0, bw, bh); Art.drawTitle(bctx, bw, bh, G ? G.time : 0); ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, 0, 0, W, H); }
   function renderTitle() {
-    renderSceneBackground(); var cy = H * 0.27; Art.text(ctx, S.title, W / 2, cy, clamp(W * 0.11, 38, 96), PAL.phosHi, "center");
-    Art.text(ctx, S.subtitle.toUpperCase(), W / 2, cy + clamp(W * 0.04, 18, 34), clamp(W * 0.022, 12, 22), PAL.bio, "center");
-    Art.wrapText(ctx, S.tagline, W / 2, cy + clamp(W * 0.07, 32, 56), clamp(W * 0.5, 280, 640), clamp(W * 0.016, 10, 16), PAL.textDim);
+    renderSceneBackground();
+    Art.drawTitleStamp(ctx, W, H, G.time); // Cyrillic stencil + recorder OSD + boot flicker
+    Art.wrapText(ctx, S.tagline, W / 2, H * 0.37, clamp(W * 0.5, 280, 640), clamp(W * 0.016, 10, 16), PAL.textDim);
     UI.menu = []; var bw = clamp(W * 0.4, 220, 340), bh = clamp(H * 0.075, 44, 62), bx = (W - bw) / 2, by = H * 0.52, gap = 14;
     var labels = [[S.menu_dive, "dive", true], [S.menu_help, "help", false], [S.menu_options, "options", false]];
     for (var i = 0; i < labels.length; i++) { var r = { x: bx, y: by + i * (bh + gap), w: bw, h: bh }; Art.button(ctx, r, labels[i][0], { primary: labels[i][2], hover: UI.hover === "m" + i || (G.padActive && G.menuSel === i) }); UI.menu.push({ r: r, act: labels[i][1] }); }
-    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
+    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, time: G.time, glitch: (G.time < 1.4 ? 0.6 : 0) }); // power-on tearing
   }
   function renderHelp() {
     renderSceneBackground(); var x = clamp(W * 0.08, 18, 180), y = clamp(H * 0.07, 30, 90), w = W - x * 2;
@@ -664,71 +716,14 @@
     UI.backBtn = { x: W / 2 - 90, y: ry + rows.length * (rh + 12) + 16, w: 180, h: 48 }; Art.button(ctx, UI.backBtn, S.menu_back, { hover: UI.hover === "back" }); Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
   }
   function renderEnd() {
-    renderSceneBackground(); ctx.fillStyle = "rgba(2,4,8,0.76)"; ctx.fillRect(0, 0, W, H);
+    renderSceneBackground(); ctx.fillStyle = "rgba(2,4,8,0.78)"; ctx.fillRect(0, 0, W, H);
     var win = G.won, title = win ? S.win_title : G.endKind === "hull" ? S.lose_hull : S.lose_oxygen, body = win ? S.win_body : G.endKind === "hull" ? S.lose_hull_body : S.lose_oxygen_body;
     var y = clamp(H * 0.2, 70, 190); Art.text(ctx, title, W / 2, y, clamp(W * 0.06, 28, 56), win ? PAL.bioHi : PAL.bloodHi, "center");
     Art.wrapText(ctx, body, W / 2, y + clamp(W * 0.05, 34, 56), clamp(W * 0.7, 280, 720), clamp(W * 0.018, 13, 19), PAL.text);
-    Art.text(ctx, fmt(S.end_depth, { d: Math.floor(G.depth), haul: G.haul }), W / 2, y + clamp(W * 0.05, 34, 56) + 104, 14, PAL.amber, "center");
-    UI.contBtn = { x: W / 2 - 120, y: H - clamp(H * 0.16, 84, 140), w: 240, h: 52 }; Art.button(ctx, UI.contBtn, S.again, { primary: true, hover: UI.hover === "cont" }); Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
-  }
-
-  // ---------------- oil-rig surface base (the hub: bank haul, buy equipment + plushies, descend) ----------------
-  function renderRig() {
-    var bw = buf.width, bh = buf.height; bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.clearRect(0, 0, bw, bh); Art.drawRig(bctx, bw, bh, G.time);
-    ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, 0, 0, W, H);
-    Art.text(ctx, "RIG DELTA-9", W / 2, clamp(H * 0.075, 30, 60), clamp(W * 0.032, 18, 30), PAL.phosHi, "center");
-    Art.text(ctx, "₽" + G.money + "    " + G.patches + " PATCH KITS", W / 2, clamp(H * 0.075, 30, 60) + clamp(W * 0.026, 15, 26), clamp(W * 0.02, 12, 18), PAL.amberHi, "center");
-    var twoCol = W > 760, topY = clamp(H * 0.16, 72, 140);
-    var leftX = clamp(W * 0.05, 14, 60), colW = twoCol ? clamp(W * 0.44, 280, 480) : W - clamp(W * 0.05, 14, 60) * 2;
-    Art.text(ctx, "OUTFIT — EQUIPMENT", leftX + 2, topY - 8, clamp(W * 0.02, 12, 16), PAL.bio, "left");
-    UI.shopHit = [];
-    var rowH = clamp((H - topY - 168) / SHOP.length, 36, 56), ry = topY;
-    for (var i = 0; i < SHOP.length; i++) {
-      var it = SHOP[i], lvl = G.up[it.id] || 0, repeat = it.repeat, maxed = !repeat && lvl >= it.costs.length;
-      var r = { x: leftX, y: ry, w: colW, h: rowH - 6 };
-      ctx.fillStyle = "rgba(10,14,20,0.55)"; Art.rrect(ctx, r.x, r.y, r.w, r.h, 5); ctx.fill();
-      ctx.strokeStyle = (G.padActive && G.shopFocus === i) ? PAL.phosHi : "rgba(90,100,114,0.5)"; ctx.lineWidth = (G.padActive && G.shopFocus === i) ? 2 : 1; Art.rrect(ctx, r.x, r.y, r.w, r.h, 5); ctx.stroke();
-      var label = it.name + (!repeat && it.costs.length > 1 ? "  [" + lvl + "/" + it.costs.length + "]" : (lvl && !repeat ? "  ✓" : ""));
-      Art.text(ctx, label, r.x + 10, r.y + 17, clamp(r.w * 0.04, 11, 15), maxed ? PAL.textDim : PAL.text, "left");
-      Art.wrapText(ctx, it.desc, r.x + r.w * 0.42, r.y + r.h - 8, r.w * 0.54, clamp(r.w * 0.028, 9, 12), PAL.textDim);
-      var btn = { x: r.x + r.w - 86, y: r.y + 6, w: 78, h: clamp(r.h - 12, 22, 32) };
-      if (maxed) Art.button(ctx, btn, "MAX", { disabled: true });
-      else { var cost = it.costs[repeat ? 0 : lvl]; Art.button(ctx, btn, "₽" + cost, { primary: G.money >= cost, hover: UI.hover === "buy" + it.id, disabled: G.money < cost }); UI.shopHit.push({ r: btn, id: it.id }); }
-      ry += rowH;
-    }
-    var rx = twoCol ? (W - leftX - colW) : leftX, rw = colW, ryy = twoCol ? topY : ry + 8;
-    Art.text(ctx, "MORALE — CABIN DECOR (PLUSHIES)", rx + 2, ryy - 8, clamp(W * 0.02, 12, 16), PAL.violetHi, "left");
-    UI.plushHit = [];
-    var pCols = PLUSHIES.length, pw = (rw - (pCols - 1) * 8) / pCols, ph = clamp(pw * 1.2, 46, 92);
-    for (var p = 0; p < PLUSHIES.length; p++) {
-      var pl = PLUSHIES[p], owned = G.plushies.indexOf(pl.id) >= 0, pr = { x: rx + p * (pw + 8), y: ryy, w: pw, h: ph };
-      ctx.fillStyle = owned ? "rgba(28,22,40,0.6)" : "rgba(10,14,20,0.55)"; Art.rrect(ctx, pr.x, pr.y, pr.w, pr.h, 5); ctx.fill();
-      ctx.strokeStyle = owned ? PAL.violetHi : "rgba(90,100,114,0.5)"; Art.rrect(ctx, pr.x, pr.y, pr.w, pr.h, 5); ctx.stroke();
-      Art.drawPlushie(ctx, pr.x + pr.w / 2, pr.y + pr.h * 0.40, Math.min(pr.w, pr.h) * 0.26, pl.id, pl.col, G.time);
-      Art.text(ctx, owned ? "✓" : "₽" + pl.cost, pr.x + pr.w / 2, pr.y + pr.h - 7, clamp(pw * 0.18, 9, 14), owned ? PAL.violetHi : (G.money >= pl.cost ? PAL.amberHi : PAL.textDim), "center");
-      if (!owned) UI.plushHit.push({ r: pr, id: pl.id, cost: pl.cost });
-    }
-    UI.diveBtn = { x: W / 2 - clamp(W * 0.22, 130, 220), y: H - clamp(H * 0.13, 70, 116), w: clamp(W * 0.44, 260, 440), h: clamp(H * 0.07, 44, 58) };
-    Art.button(ctx, UI.diveBtn, "▼  DESCEND  ▼", { primary: true, hover: UI.hover === "dive" });
-    UI.backBtn = { x: 12, y: H - 42, w: 108, h: 32 }; Art.button(ctx, UI.backBtn, S.menu_options, { hover: UI.hover === "back" });
-    UI.briefBtn = { x: 128, y: H - 42, w: 108, h: 32 }; Art.button(ctx, UI.briefBtn, S.menu_help, { hover: UI.hover === "brief" });
-    if (G.portMsgT > 0) { ctx.globalAlpha = clamp(G.portMsgT, 0, 1); Art.text(ctx, G.portMsg, W / 2, UI.diveBtn.y - 12, clamp(W * 0.02, 12, 17), PAL.amberHi, "center"); ctx.globalAlpha = 1; }
-    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
-  }
-  function buy(id) {
-    var it = shopItem(id), lvl = G.up[id] || 0;
-    if (id === "patch") { if (G.money < it.costs[0]) { portMsg("Not enough ₽."); Audio.alert(); return; } G.money -= it.costs[0]; G.patches += it.vals[0]; Audio.good(); portMsg("Patch kits stocked."); return; }
-    if (lvl >= it.costs.length) { portMsg("Already maxed."); return; }
-    var cost = it.costs[lvl]; if (G.money < cost) { portMsg("Not enough ₽."); Audio.alert(); return; }
-    G.money -= cost; G.up[id] = lvl + 1; Audio.good(); portMsg("Installed " + it.name + ".");
-  }
-  function buyPlushie(id, cost) { if (G.plushies.indexOf(id) >= 0) return; if (G.money < cost) { portMsg("Not enough ₽."); Audio.alert(); return; } G.money -= cost; G.plushies.push(id); Audio.good(); portMsg("A little friend for the cabin."); }
-  function onRigDown(p) {
-    for (var i = 0; i < UI.shopHit.length; i++) if (inside(UI.shopHit[i].r, p)) { buy(UI.shopHit[i].id); return; }
-    for (var j = 0; j < UI.plushHit.length; j++) if (inside(UI.plushHit[j].r, p)) { buyPlushie(UI.plushHit[j].id, UI.plushHit[j].cost); return; }
-    if (inside(UI.diveBtn, p)) { Audio.card(); startRun(); return; }
-    if (inside(UI.briefBtn, p)) { UI.overlay = "help"; return; }
-    if (inside(UI.backBtn, p)) { UI.overlay = "options"; return; }
+    Art.text(ctx, fmt(S.end_depth, { d: Math.floor(G.depth) }), W / 2, y + clamp(W * 0.05, 34, 56) + 104, 14, PAL.amber, "center");
+    UI.contBtn = { x: W / 2 - 120, y: H - clamp(H * 0.16, 84, 140), w: 240, h: 52 }; Art.button(ctx, UI.contBtn, S.again, { primary: true, hover: UI.hover === "cont" });
+    drawRadioPanel(); // Sergey's last words land on the comms readout
+    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, time: G.time, glitch: win ? 0 : 0.3 });
   }
 
   // ---------------- input ----------------
@@ -741,11 +736,11 @@
     Audio.init(); if (!G) return;
     if (UI.overlay) { if (UI.overlay === "options" && UI.optHit) for (var i = 0; i < UI.optHit.length; i++) if (inside(UI.optHit[i].r, p)) { OPT[UI.optHit[i].key] = !OPT[UI.optHit[i].key]; saveOpt(); Audio.setEnabled(OPT.sound); Audio.card(); return; } if (inside(UI.backBtn, p)) { UI.overlay = null; Audio.card(); } return; }
     if (G.scene === "dive") return onDiveDown(p);
-    if (G.scene === "rig") return onRigDown(p);
-    if (G.scene === "end") { if (inside(UI.contBtn, p)) { Audio.card(); G.scene = "rig"; } return; }
-    for (var m = 0; m < UI.menu.length; m++) if (inside(UI.menu[m].r, p)) { var act = UI.menu[m].act; Audio.card(); if (act === "dive") G.scene = "rig"; else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; return; }
+    if (G.scene === "end") { if (inside(UI.contBtn, p)) { Audio.card(); startRun(); } return; } // retry from layer 1
+    for (var m = 0; m < UI.menu.length; m++) if (inside(UI.menu[m].r, p)) { var act = UI.menu[m].act; Audio.card(); if (act === "dive") startRun(); else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; return; }
   }
   function onDiveDown(p) {
+    G.idleT = 0; // any cabin interaction breaks the "idle" tutorial/whisper timer
     if (G.lock) { lockAttempt(); return; } // mini-game has focus: any tap fires a lock
     if (inside(L.btn.ping, p)) { ping(); return; }
     if (inside(L.btn.light, p)) { toggleLight(); return; }
@@ -763,7 +758,6 @@
   function onHover(p) { UI.hover = null; if (!G) return;
     if (UI.overlay) { if (inside(UI.backBtn, p)) UI.hover = "back"; return; }
     if (G.scene === "dive") { var bb = L.btn; if (inside(bb.ping, p)) UI.hover = "ping"; else if (inside(bb.light, p)) UI.hover = "light"; else if (inside(bb.excavate, p)) UI.hover = "excavate"; else if (inside(bb.patch, p)) UI.hover = "patch"; else if (inside(bb.crank, p)) UI.hover = "crank"; else if (inside(bb.brief, p)) UI.hover = "brief"; else { var d = dpadRects(); for (var key in d) if (inside(d[key], p)) { UI.hover = key; break; } } return; }
-    if (G.scene === "rig") { for (var si = 0; si < UI.shopHit.length; si++) if (inside(UI.shopHit[si].r, p)) { UI.hover = "buy" + UI.shopHit[si].id; return; } if (inside(UI.diveBtn, p)) UI.hover = "dive"; else if (inside(UI.briefBtn, p)) UI.hover = "brief"; else if (inside(UI.backBtn, p)) UI.hover = "back"; return; }
     if (G.scene === "end") { if (inside(UI.contBtn, p)) UI.hover = "cont"; return; }
     for (var m = 0; m < UI.menu.length; m++) if (inside(UI.menu[m].r, p)) UI.hover = "m" + m;
   }
@@ -776,7 +770,7 @@
     var d = dpadRects(); for (var k in d) if (inside(d[k], p)) return true;
     return false;
   }
-  function applyLook(dx, dy) { var c = G.cam; c.tgtYaw = clamp(c.tgtYaw - dx * 0.0026, -0.62, 0.62); c.tgtPitch = clamp(c.tgtPitch - dy * 0.0026, -0.34, 0.40); c.active = 1; c.lastLook = G.time; }
+  function applyLook(dx, dy) { var c = G.cam; c.tgtYaw = clamp(c.tgtYaw - dx * 0.0026, -0.62, 0.62); c.tgtPitch = clamp(c.tgtPitch - dy * 0.0026, -0.34, 0.40); c.active = 1; c.lastLook = G.time; G.idleT = 0; }
   function canLook(p) { return G && G.scene === "dive" && !UI.overlay && !G.lock && !G.scare && !overControl(p) && !gridCellAt(p); }
 
   canvas.addEventListener("mousedown", function (e) { var p = pt(e); drag.down = true; drag.lx = p.x; drag.ly = p.y; drag.moved = 0;
@@ -822,9 +816,9 @@
       else if (code === "KeyC") { crank(); e.preventDefault(); }
       else if (code === "KeyP") { patch(); e.preventDefault(); }
       else if (code === "Escape") { UI.overlay = "options"; }
-    } else if (G.scene === "rig") { if (code === "Enter" || code === "Space") { startRun(); e.preventDefault(); } else if (code === "Escape") { UI.overlay = "options"; } }
-    else if (G.scene === "end") { if (code === "Enter" || code === "Space") { G.scene = "rig"; e.preventDefault(); } }
-    else { if (code === "Enter" || code === "Space") { G.scene = "rig"; e.preventDefault(); } }
+    }
+    else if (G.scene === "end") { if (code === "Enter" || code === "Space") { startRun(); e.preventDefault(); } }
+    else { if (code === "Enter" || code === "Space") { startRun(); e.preventDefault(); } } // title -> dive (no rig)
   });
 
   var padPrev = {};
@@ -845,12 +839,9 @@
           if (Math.abs(ryy) > 0.14) { G.cam.tgtPitch = clamp(G.cam.tgtPitch + ryy * 2.0 * STEP / 1000, -0.34, 0.40); G.cam.active = 1; G.cam.lastLook = G.time; }
         }
         padPrev._u = ax[1] < -0.5; padPrev._d = ax[1] > 0.5; padPrev._l = ax[0] < -0.5; padPrev._r = ax[0] > 0.5;
-      } else if (G.scene === "rig") {
-        if (pressed(12)) G.shopFocus = (G.shopFocus + SHOP.length - 1) % SHOP.length; if (pressed(13)) G.shopFocus = (G.shopFocus + 1) % SHOP.length;
-        if (pressed(0)) buy(SHOP[G.shopFocus].id); if (pressed(9)) startRun(); if (pressed(1)) UI.overlay = "options"; if (pressed(3)) UI.overlay = "help";
-      } else if (G.scene === "end") { if (pressed(0) || pressed(9)) G.scene = "rig"; }
+      } else if (G.scene === "end") { if (pressed(0) || pressed(9)) startRun(); }
       else { if (pressed(12)) G.menuSel = (G.menuSel + UI.menu.length - 1) % (UI.menu.length || 1); if (pressed(13)) G.menuSel = (G.menuSel + 1) % (UI.menu.length || 1);
-        if (pressed(0) || pressed(9)) { var act = UI.menu[G.menuSel] ? UI.menu[G.menuSel].act : "dive"; if (act === "dive") G.scene = "rig"; else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; } }
+        if (pressed(0) || pressed(9)) { var act = UI.menu[G.menuSel] ? UI.menu[G.menuSel].act : "dive"; if (act === "dive") startRun(); else if (act === "help") UI.overlay = "help"; else if (act === "options") UI.overlay = "options"; } }
       for (var i = 0; i < b.length; i++) padPrev[i] = b[i] && b[i].pressed;
     }
   }
@@ -869,5 +860,5 @@
   }
 
   newRun(randomSeed()); resize(); requestAnimationFrame(frame);
-  window.DREADNOUGHT = { G: function () { return G; }, newRun: newRun, startRun: startRun, drive: tryDrive, ping: ping, flagFaced: flagFaced, toggleLight: toggleLight, secure: secure, lockAttempt: lockAttempt, patch: patch, crank: crank, surface: surface, buy: buy, buyPlushie: buyPlushie, moveAnglers: moveAnglers, OPT: OPT };
+  window.DREADNOUGHT = { G: function () { return G; }, newRun: newRun, startRun: startRun, drive: tryDrive, ping: ping, flagFaced: flagFaced, toggleLight: toggleLight, secure: secure, lockAttempt: lockAttempt, patch: patch, crank: crank, moveAnglers: moveAnglers, descend: descend, radioQueue: radioQueue, OPT: OPT };
 })();
