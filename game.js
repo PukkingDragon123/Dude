@@ -252,7 +252,10 @@
     return moved;
   }
 
-  function startRun() { G.layer = 1; G.hull = effMaxHull(); G.oxygen = effMaxOxygen(); G.haul = 0; G.threat = 0; G.lightOn = false; G.leak = 0; G.scare = null; G.won = false; G.endKind = null; genLayer(1); G.scene = "dive"; Audio.setMusic("ambient"); }
+  function startRun() { G.layer = 1; G.hull = effMaxHull(); G.oxygen = effMaxOxygen(); G.haul = 0; G.threat = 0; G.lightOn = false; G.leak = 0; G.leakStep = 0; G.scare = null; G.won = false; G.endKind = null;
+    G.passby = null; G.passT = 4; G.valveAngle = 0; G.valveSpin = 0;
+    G.cam.yaw = G.cam.pitch = G.cam.vYaw = G.cam.vPitch = G.cam.tgtYaw = G.cam.tgtPitch = 0; G.cam.active = 0; // each dive starts facing the window
+    genLayer(1); G.scene = "dive"; Audio.setMusic("ambient"); }
   function descend() { Audio.descend(); if (OPT.shake) G.shake = 6; var nl = G.layer + 1; if (nl > CFG.layers) { winRun(); return; } genLayer(nl); G.threat = clamp(G.threat - 20, 0, 100); }
   function surface() { if (G.scene !== "dive") return; G.money += G.haul; G.haul = 0; Audio.ascend(); G.scene = "rig"; Audio.setMusic("none"); }
   function winRun() { G.money += G.haul; G.scene = "end"; G.won = true; G.endKind = "win"; Audio.setMusic("none"); Audio.win(); }
