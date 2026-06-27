@@ -42,13 +42,15 @@
 
   // ---- monsters (the mines). single-cell so the deduction + safe-path guarantee stay clean;
   //      variety from damage, tier and portrait. reuse existing drawPortrait shapes. ----
+  // every contact is now a MUTATION — a drowned man's face grafted to an eel body. Tiers/dmg unchanged
+  // so the minesweeper math + safe-path guarantee + numbers are identical; only the horror reskins.
   var MONSTERS = {
-    angler:    { name: "Anglerfish",     tier: 1, shape: "angler",    dmg: [14, 22] },
-    hagfish:   { name: "Hagfish Knot",   tier: 1, shape: "hagfish",   dmg: [12, 18] },
-    swimmer:   { name: "Pale Swimmer",   tier: 2, shape: "swimmer",   dmg: [16, 24] },
-    squid:     { name: "Colossal Squid", tier: 2, shape: "squid",     dmg: [22, 32] },
-    bonewhale: { name: "Bonewhale",      tier: 3, shape: "whale",     dmg: [26, 38] },
-    bloop:     { name: "THE BLOOP",      tier: 4, shape: "bloop",     dmg: [50, 82] }, // colossal; the deep horror
+    angler:    { name: "Mutation (drifter)",   tier: 1, shape: "mutation",     dmg: [14, 22] },
+    hagfish:   { name: "Mutation (knotted)",   tier: 1, shape: "mutation",     dmg: [12, 18] },
+    swimmer:   { name: "Mutation (reacher)",   tier: 2, shape: "mutation",     dmg: [16, 24] },
+    squid:     { name: "Mutation (many-armed)",tier: 2, shape: "mutation",     dmg: [22, 32] },
+    bonewhale: { name: "Mutation (the host)",  tier: 3, shape: "mutation",     dmg: [26, 38] },
+    bloop:     { name: "THE DOORMAN",          tier: 4, shape: "mutationKing", dmg: [50, 82] }, // many crews fused
   };
 
   // ---- loot / cell contents (safe; NOT counted in numbers). ----
@@ -102,7 +104,8 @@
            { speaker: "СЕРГЕЙ",  line: "The pulse is louder than my own heart now." } ],
       3: [ { speaker: "КОМАНДА", line: "...Volkov, repeat — [помехи] — say again your dep—" },
            { speaker: "K-219",   line: "...this is K-219... do not answer the bell... do not..." },
-           { speaker: "СЕРГЕЙ",  line: "That was a Russian voice. K-219 sank in '86." } ],
+           { speaker: "СЕРГЕЙ",  line: "That was a Russian voice. K-219 sank in '86." },
+           { speaker: "K-219",   line: "We called the first face the Seqkrey. Then it wore Petrov. Then us." } ],
       4: [ { speaker: "КОМАНДА", line: "[помехи] ...Sergey... are you... [помехи] ...alone down..." },
            { speaker: "K-219",   line: "We turned the valve. We all turned the valve. It opened." },
            { speaker: "СЕРГЕЙ",  line: "Forty-one names on the hull outside my window. I counted." } ],
@@ -136,6 +139,7 @@
       ],
       nearMiss: [
         { speaker: "СЕРГЕЙ",   line: "It's against the hull. I can hear it breathe." },
+        { speaker: "СЕРГЕЙ",   line: "It's pressing its face to the glass. Still smiling." },
         { speaker: "K-219",    line: "Run silent. Run silent. Run sil—" },
         { speaker: "ИСТОЧНИК", line: "One cell. Один. So close, Sergey." }
       ],
@@ -146,6 +150,7 @@
       deepIdle: [
         { speaker: "СЕРГЕЙ",   line: "The pressure presses my thoughts flat." },
         { speaker: "ИСТОЧНИК", line: "Why have you stopped? Keep coming down." },
+        { speaker: "ИСТОЧНИК", line: "Stop swimming, Sergey. Let the face finish forming. It's almost yours." },
         { speaker: "K-219",    line: "Don't sit still. Sitting still is how it finds the face." }
       ]
     },
@@ -156,10 +161,17 @@
     ],
     win:       { speaker: "ИСТОЧНИК", line: "Добро пожаловать домой, Сергей. Welcome home." },
     deathHull: { speaker: "СЕРГЕЙ",   line: "Seam's gone — water — [помехи] — tell them I reached—" },
-    deathAir:  [ { speaker: "СЕРГЕЙ", line: "No air. The ping keeps sweeping for... no one." },
-                 { speaker: "K-219",  line: "Now you stay. Now you keep the valve warm." } ],
+    deathAir:  [ { speaker: "СЕРГЕЙ", line: "No air. The cold gets in. My mouth... why does my mouth feel wide." },
+                 { speaker: "K-219",  line: "Now you stay. Now you smile. Now you keep the valve warm." } ],
     seal:      { speaker: "КОМАНДА", line: "Clang. Hatch sealed. No way up now, Sergey. Only down." },
-    noway:     { speaker: "СЕРГЕЙ",  line: "There's no surface to run to. Find the hatch. Go down." }
+    noway:     { speaker: "СЕРГЕЙ",  line: "There's no surface to run to. Find the hatch. Go down." },
+    // the MUTATION reveal — the lost crew, wearing the faces they drowned in
+    reveal: [
+      { speaker: "СЕРГЕЙ", line: "It came up to the glass. It... it has a face. A man's face." },
+      { speaker: "СЕРГЕЙ", line: "It's smiling at me. Too wide. Why is it smiling." },
+      { speaker: "K-219",  line: "Don't look away. It only smiles wider when you look away." },
+      { speaker: "СЕРГЕЙ", line: "Those are faces. Those are the crew. God — that's Antonov." }
+    ]
   };
 
   root.DN = root.DN || {};

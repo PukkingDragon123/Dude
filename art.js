@@ -18,8 +18,8 @@
     violet:"#8a6bd6", violetHi:"#c3aeff",
     text:"#cfe6df", textDim:"#6f8a84",
     // aged-phosphor grade targets — darker, cooler, more desaturating (dread)
-    agedWash:"rgba(10,16,20,0.28)", agedTint:"rgba(120,200,170,0.035)", amberBurn:"rgba(180,120,30,0.04)",
-    deadGrade:"rgba(4,7,11,0.34)",  // cold near-black multiply that sinks the whole frame toward black
+    agedWash:"rgba(10,16,20,0.18)", agedTint:"rgba(120,200,170,0.035)", amberBurn:"rgba(180,120,30,0.04)",
+    deadGrade:"rgba(4,7,11,0.22)",  // cold near-black multiply (lightened — less crushing, still moody)
   };
 
   function hash(str) { var h = 2166136261; str = String(str);
@@ -428,13 +428,19 @@
     ctx.restore();
   }
 
+  // 3D-extruded button: a cap that floats above an extruded skirt and DEPRESSES when pressed.
+  // Same signature; opts.depth = px the cap is raised (0 = fully pressed). Hit rect r is unchanged.
   function button(ctx, r, label, opts) {
-    opts = opts||{};
-    var grd = ctx.createLinearGradient(r.x,r.y,r.x,r.y+r.h);
-    grd.addColorStop(0, opts.primary?"#3a2f12":PAL.steelHi); grd.addColorStop(1, opts.primary?"#1c1606":PAL.steelLo);
-    ctx.fillStyle = opts.disabled?"#15181d":grd; rrect(ctx,r.x,r.y,r.w,r.h,5); ctx.fill();
-    ctx.strokeStyle = opts.hover?PAL.amberHi:(opts.primary?PAL.amber:PAL.steel); ctx.lineWidth=opts.hover?2:1.2; rrect(ctx,r.x,r.y,r.w,r.h,5); ctx.stroke();
-    text(ctx, label, r.x+r.w/2, r.y+r.h/2+Math.round(r.h*0.18), Math.min(18, Math.round(r.h*0.42)), opts.disabled?PAL.textDim:(opts.primary?PAL.amberHi:PAL.text), "center");
+    opts = opts || {}; var d = opts.depth == null ? 4 : opts.depth; if (opts.disabled) d = 1;
+    ctx.fillStyle = "#0c0f13"; rrect(ctx, r.x, r.y - d + 2, r.w, r.h, 5); ctx.fill();   // skirt under the cap (the extrusion)
+    ctx.fillStyle = "#14181e"; ctx.beginPath(); ctx.moveTo(r.x + r.w, r.y - d); ctx.lineTo(r.x + r.w, r.y + r.h); ctx.lineTo(r.x + r.w - 2, r.y + r.h); ctx.lineTo(r.x + r.w - 2, r.y - d); ctx.closePath(); ctx.fill();
+    var cy = r.y - d;
+    var grd = ctx.createLinearGradient(r.x, cy, r.x, cy + r.h);
+    grd.addColorStop(0, opts.primary ? "#3a2f12" : PAL.steelHi); grd.addColorStop(1, opts.primary ? "#1c1606" : PAL.steelLo);
+    ctx.fillStyle = opts.disabled ? "#15181d" : grd; rrect(ctx, r.x, cy, r.w, r.h, 5); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.10)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(r.x + 3, cy + 1.5); ctx.lineTo(r.x + r.w - 3, cy + 1.5); ctx.stroke();
+    ctx.strokeStyle = opts.hover ? PAL.amberHi : (opts.primary ? PAL.amber : PAL.steel); ctx.lineWidth = opts.hover ? 2 : 1.2; rrect(ctx, r.x, cy, r.w, r.h, 5); ctx.stroke();
+    text(ctx, label, r.x + r.w / 2, cy + r.h / 2 + Math.round(r.h * 0.18), Math.min(18, Math.round(r.h * 0.42)), opts.disabled ? PAL.textDim : (opts.primary ? PAL.amberHi : PAL.text), "center");
   }
 
   // full aged-CRT composite. opts: {scanlines, flash, flashCol, sanity, time, glitch, grade, pixel}
@@ -464,7 +470,7 @@
     // (a) baked curvature + corner vignette (bowed tube), then a soft center vignette
     if (cache.curve) ctx.drawImage(cache.curve, 0, 0, w, h);
     var vg = ctx.createRadialGradient(w/2,h/2, Math.min(w,h)*0.40, w/2,h/2, Math.max(w,h)*0.74);
-    vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(0,0,0,0.55)"); ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
+    vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(0,0,0,0.42)"); ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
     // (b) dense scanlines
     if (opts.scanlines!==false && cache.scan) ctx.drawImage(cache.scan, 0, 0, w, h);
     // (c) rolling refresh band (a slow bright bar drifting down the tube)
@@ -702,8 +708,9 @@
       var fog2 = Math.max(0, 1 - k.rz / range), sz2 = Math.min(bh * 0.8, (focal * 1.7) / k.rz);
       if (k.isMonster) {
         var seen = lightOn ? Math.max(fog2, 0.4) : (k.rz < 16 ? (16 - k.rz) / 16 * 0.7 : 0.05);
-        if (k.monShape === "bloop") drawBloop3D(ctx, x, y, sz2 * 0.85, { yaw: Math.sin(t * 0.45 + k.rz) * 0.3, pitch: -0.1, mouth: 0.28 + 0.16 * Math.sin(t * 1.1), t: t, lit: seen });
-        else drawAngler3D(ctx, x, y, sz2 * 0.55, { yaw: Math.sin(t * 0.7 + k.rz) * 0.45, pitch: -0.12 + Math.sin(t * 0.5) * 0.08, mouth: 0.18 + 0.12 * Math.sin(t * 1.5), t: t, lit: seen, boss: false });
+        // a half-seen drowned FACE in the trench ahead (dim; the uncanny mutation)
+        var fsz = (k.monShape === "mutationKing" ? sz2 * 0.9 : sz2 * 0.62);
+        drawMutation(ctx, x, y, fsz, { yaw: Math.sin(t * 0.5 + k.rz) * 0.35, pitch: -0.06 + Math.sin(t * 0.4) * 0.05, smile: 0.7, t: t, lit: seen * 0.85 });
       } else {
         var glowSeen = lightOn ? fog2 : (k.rz < 22 ? Math.max(0, (22 - k.rz) / 22) * 0.4 : 0); if (glowSeen <= 0.02) continue;
         var col = k.kind === "vent" ? PAL.phos : k.kind === "source" ? PAL.violetHi : k.kind === "artifact" ? PAL.bio : PAL.bioHi;
@@ -1141,6 +1148,157 @@
     ctx.textAlign = "right"; ctx.fillStyle = PAL.amberLo || PAL.amber; ctx.fillText("СССР · СЕВ. ФЛОТ · СЕКРЕТНО", w - 18, h - 18); ctx.restore();
   }
 
+  // ============ low-poly helpers + new 3D art (cutscene rig/sub, mutation face, hands, housings) ============
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  // flat-shaded faceted quad: fill + a darker same-hue crease stroke (the low-poly "stepped" look)
+  function facetQuad(ctx, p0, p1, p2, p3, lo, hi, sh, amb) {
+    var k = (0.12 + sh * sh * 0.88) * amb; if (k > 1) k = 1;
+    var r = (lo[0] + (hi[0] - lo[0]) * k) | 0, g = (lo[1] + (hi[1] - lo[1]) * k) | 0, b = (lo[2] + (hi[2] - lo[2]) * k) | 0;
+    ctx.fillStyle = "rgb(" + r + "," + g + "," + b + ")";
+    ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.lineTo(p3[0], p3[1]); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "rgb(" + (r * 0.55 | 0) + "," + (g * 0.55 | 0) + "," + (b * 0.55 | 0) + ")"; ctx.lineWidth = 1; ctx.stroke();
+  }
+  // perspective console-bezel skirt behind any axis-aligned rect (interactive rect is unchanged)
+  function consoleHousing(ctx, r, o) {
+    o = o || {}; var inset = o.inset == null ? 10 : o.inset, vy = o.vy == null ? r.y - r.h * 1.4 : o.vy, vx = r.x + r.w / 2, a = 0.06;
+    function toV(x, y) { return [x + (vx - x) * a, y + (vy - y) * a]; }
+    var x0 = r.x - inset, y0 = r.y - inset, x1 = r.x + r.w + inset, y1 = r.y + r.h + inset;
+    var bTL = toV(x0, y0), bTR = toV(x1, y0), bBR = toV(x1, y1), bBL = toV(x0, y1);
+    function side(p0, p1, p2, p3, c) { ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.lineTo(p3[0], p3[1]); ctx.closePath(); ctx.fill(); ctx.strokeStyle = "#05080c"; ctx.lineWidth = 1; ctx.stroke(); }
+    side([x0, y0], [x1, y0], bTR, bTL, "#2a323c"); side([x1, y0], [x1, y1], bBR, bTR, "#1a2028");
+    side([x0, y1], [x1, y1], bBR, bBL, "#10141a"); side([x0, y0], [x0, y1], bBL, bTL, "#1f262e");
+    ctx.fillStyle = PAL.steelLo; rrect(ctx, x0, y0, r.w + inset * 2, r.h + inset * 2, 8); ctx.fill();
+    ctx.strokeStyle = PAL.steelHi; ctx.lineWidth = 1.5; rrect(ctx, x0 + 1, y0 + 1, r.w + inset * 2 - 2, r.h + inset * 2 - 2, 8); ctx.stroke();
+    ctx.fillStyle = PAL.rivet; var nb = Math.max(4, (r.w / 44) | 0); for (var i = 0; i <= nb; i++) { ctx.beginPath(); ctx.arc(x0 + (r.w + inset * 2) * i / nb, y0 + 3, 1.8, 0, 7); ctx.fill(); }
+  }
+  // first-person low-poly gloved hands (foreground)
+  function drawHands(ctx, o) {
+    o = o || {}; var t = o.t || 0, san = o.sanity == null ? 1 : o.sanity, restY = o.restY, WW = o.w;
+    var breathe = Math.sin(t * 1.1) * (4 + (1 - san) * 10), GLO = [18, 22, 26], GHI = [66, 76, 82];
+    function hand(wx, wy, reach, mirror) {
+      var ry = wy + (1 - reach) * (restY - wy) + breathe, s = WW * 0.10, dir = mirror ? -1 : 1;
+      ctx.save(); ctx.translate(wx, ry); ctx.scale(dir, 1);
+      poly(ctx, [[-s * 0.5, s * 2.6], [s * 0.5, s * 2.6], [s * 0.62, s * 0.5], [-s * 0.42, s * 0.5]], "rgb(" + (GLO[0] * 1.4 | 0) + "," + (GLO[1] * 1.4 | 0) + "," + (GLO[2] * 1.4 | 0) + ")", "#06090c", 1.2);
+      poly(ctx, [[-s * 0.55, s * 0.55], [s * 0.6, s * 0.5], [s * 0.5, -s * 0.35], [-s * 0.45, -s * 0.3]], "rgb(" + ((GLO[0] + (GHI[0] - GLO[0]) * 0.72) | 0) + "," + ((GLO[1] + (GHI[1] - GLO[1]) * 0.72) | 0) + "," + ((GLO[2] + (GHI[2] - GLO[2]) * 0.72) | 0) + ")", "#07090d", 1.2);
+      var curl = 0.5 - reach * 0.45;
+      for (var f = 0; f < 4; f++) { var fx = (-0.34 + f * 0.30) * s * 1.05, base = -s * 0.3, len = s * (0.85 - f * 0.05);
+        var midx = fx + Math.sin(curl) * len * 0.3, midy = base - Math.cos(curl) * len * 0.55, tipx = midx + Math.sin(curl * 0.6) * len * 0.25, tipy = midy - Math.cos(curl * 0.6) * len * 0.5, k = 0.55 + f * 0.06;
+        ctx.strokeStyle = "rgb(" + ((GLO[0] + (GHI[0] - GLO[0]) * k) | 0) + "," + ((GLO[1] + (GHI[1] - GLO[1]) * k) | 0) + "," + ((GLO[2] + (GHI[2] - GLO[2]) * k) | 0) + ")";
+        ctx.lineCap = "round"; ctx.lineWidth = s * 0.16; ctx.beginPath(); ctx.moveTo(fx, base); ctx.lineTo(midx, midy); ctx.lineTo(tipx, tipy); ctx.stroke(); }
+      ctx.strokeStyle = "rgb(" + ((GLO[0] + (GHI[0] - GLO[0]) * 0.6) | 0) + "," + ((GLO[1] + (GHI[1] - GLO[1]) * 0.6) | 0) + "," + ((GLO[2] + (GHI[2] - GLO[2]) * 0.6) | 0) + ")";
+      ctx.lineWidth = s * 0.2; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(-s * 0.45, s * 0.15); ctx.lineTo(-s * 0.7, -s * 0.2 + reach * s * 0.2); ctx.stroke();
+      ctx.restore();
+    }
+    hand(o.lx, o.ly, o.lReach || 0, true); hand(o.rx, o.ry, o.rReach || 0, false);
+  }
+
+  // ---------- THE MUTATION — a drowned human face on an eel body (low-poly software 3D) ----------
+  var _mut = null;
+  function mutationMesh() {
+    if (_mut) return _mut;
+    var nz = 11, ns = 12, rings = [];
+    for (var i = 0; i < nz; i++) { var u = i / (nz - 1), z = -1.55 + u * 2.45;
+      var head = Math.pow(Math.max(0, Math.sin(Math.min(1, u) * Math.PI)), 0.5), r = 0.07 + 0.62 * head + 0.10 * Math.max(0, u - 0.5);
+      if (u > 0.7) r *= 1.0 + (u - 0.7) * 1.1;
+      var ring = []; for (var j = 0; j < ns; j++) { var a = j / ns * Math.PI * 2, rib = (u < 0.55) ? (1 + 0.14 * Math.sin(a * 4 + i * 1.3)) : 1, flat = (u > 0.72) ? 0.72 : 1;
+        ring.push([Math.cos(a) * r * rib, Math.sin(a) * r * 0.86 * rib, z * flat + z * (1 - flat)]); }
+      rings.push(ring); }
+    var faces = []; for (var i2 = 0; i2 < nz - 1; i2++) for (var j2 = 0; j2 < ns; j2++) { var jb = (j2 + 1) % ns; faces.push([rings[i2][j2], rings[i2][jb], rings[i2 + 1][jb], rings[i2 + 1][j2]]); }
+    _mut = { faces: faces, faceZ: 0.92 }; return _mut;
+  }
+  function drawMutation(ctx, cx, cy, size, o) {
+    o = o || {}; var yaw = o.yaw || 0, pitch = o.pitch || 0, smile = o.smile == null ? 0.85 : o.smile, t = o.t || 0, lit = o.lit == null ? 1 : o.lit, camZ = 3.0;
+    var M = mutationMesh(), light = v3norm([0.12, -0.85, -0.5]); // dim-from-below underlight
+    function tp(v) { var r = rot3(v, yaw, pitch); var z = r[2] + camZ; if (z < 0.25) z = 0.25; var f = size / z; return [cx + r[0] * f, cy - r[1] * f, z, r]; }
+    var LO = [16, 20, 19], HI = [126, 134, 120], drawn = [], minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
+    for (var i = 0; i < M.faces.length; i++) { var f = M.faces[i], p = [tp(f[0]), tp(f[1]), tp(f[2]), tp(f[3])];
+      var n = v3norm(v3cross(v3sub(p[1][3], p[0][3]), v3sub(p[2][3], p[0][3]))), sh = Math.max(0, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]);
+      for (var b = 0; b < 4; b++) { if (p[b][0] < minx) minx = p[b][0]; if (p[b][0] > maxx) maxx = p[b][0]; if (p[b][1] < miny) miny = p[b][1]; if (p[b][1] > maxy) maxy = p[b][1]; }
+      drawn.push({ p: p, z: (p[0][2] + p[1][2] + p[2][2] + p[3][2]) / 4, sh: sh }); }
+    drawn.sort(function (a, b) { return b.z - a.z; });
+    for (var d2 = 0; d2 < drawn.length; d2++) { var dn = drawn[d2], k = (0.10 + dn.sh * dn.sh * 0.9) * (0.40 + lit * 0.60);
+      ctx.fillStyle = "rgb(" + Math.round(LO[0] + (HI[0] - LO[0]) * k) + "," + Math.round(LO[1] + (HI[1] - LO[1]) * k) + "," + Math.round(LO[2] + (HI[2] - LO[2]) * k) + ")";
+      ctx.beginPath(); ctx.moveTo(dn.p[0][0], dn.p[0][1]); for (var q = 1; q < 4; q++) ctx.lineTo(dn.p[q][0], dn.p[q][1]); ctx.closePath(); ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = ctx.fillStyle; ctx.stroke(); }
+    var bcx = (minx + maxx) / 2, bcy = (miny + maxy) / 2, br = Math.max(maxx - minx, maxy - miny) * 0.66;
+    var vg = ctx.createRadialGradient(bcx, bcy, br * 0.42, bcx, bcy, br); vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(2,5,7," + (0.6 + (1 - lit) * 0.36).toFixed(2) + ")");
+    ctx.save(); ctx.fillStyle = vg; ctx.beginPath(); ctx.arc(bcx, bcy, br, 0, 7); ctx.fill(); ctx.restore();
+    var anchor = tp([0, 0, M.faceZ]), rim = tp([0, 0.6, M.faceZ]), faceR = Math.max(8, Math.abs(anchor[1] - rim[1]) * 1.15);
+    drawMutationFace(ctx, anchor[0], anchor[1], faceR, { smile: smile, t: t, lit: lit });
+  }
+  // face-only renderer (jumpscare + reveal + body) — pallid underlit, too-wide smile, wrong drifting eyes
+  function drawMutationFace(ctx, cx, cy, faceR, o) {
+    o = o || {}; var smile = o.smile == null ? 0.85 : o.smile, t = o.t || 0, lit = o.lit == null ? 1 : o.lit, R = faceR, lo = lit, drift = Math.sin(t * 0.6) * R * 0.05;
+    ctx.save(); ctx.translate(cx, cy);
+    var fg = ctx.createLinearGradient(0, R * 0.9, 0, -R * 1.0);
+    fg.addColorStop(0, "rgb(" + Math.round(120 * lo + 18) + "," + Math.round(126 * lo + 22) + "," + Math.round(110 * lo + 20) + ")");
+    fg.addColorStop(0.5, "rgb(" + Math.round(54 * lo + 14) + "," + Math.round(60 * lo + 16) + "," + Math.round(54 * lo + 15) + ")");
+    fg.addColorStop(1, "rgba(6,9,10,1)"); ctx.fillStyle = fg; ctx.beginPath(); ctx.ellipse(0, 0, R * 0.95, R * 1.18, 0, 0, 7); ctx.fill();
+    poly(ctx, [[-R * 0.95, -R * 0.2], [-R * 0.5, -R * 0.05], [-R * 0.6, R * 0.55]], "rgba(6,10,11,0.55)");
+    poly(ctx, [[R * 0.95, -R * 0.2], [R * 0.5, -R * 0.05], [R * 0.6, R * 0.55]], "rgba(6,10,11,0.55)");
+    poly(ctx, [[-R * 0.06, -R * 0.15], [R * 0.06, -R * 0.15], [R * 0.10, R * 0.25], [-R * 0.10, R * 0.25]], "rgba(170,178,160," + (0.18 + 0.18 * lit).toFixed(2) + ")");
+    function eye(ex, ey, er, dx, look) {
+      ctx.fillStyle = "rgba(5,9,9,0.9)"; ctx.beginPath(); ctx.ellipse(ex, ey, er * 1.5, er * 1.25, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "rgba(176,182,166," + (0.5 + 0.4 * lit).toFixed(2) + ")"; ctx.beginPath(); ctx.arc(ex, ey, er, 0, 7); ctx.fill();
+      ctx.fillStyle = "#04060a"; ctx.beginPath(); ctx.arc(ex + dx, ey + look, er * 0.42, 0, 7); ctx.fill(); glowDot(ctx, ex, ey, er * 1.3, "#324a40", 0.10 * lit);
+    }
+    eye(-R * 0.42, -R * 0.30, R * 0.16, drift, Math.sin(t * 0.4) * R * 0.03);
+    eye(R * 0.42, -R * 0.30, R * 0.16, -drift * 0.6, Math.sin(t * 0.9 + 2) * R * 0.04);
+    eye(R * 0.66, -R * 0.02, R * 0.10, Math.sin(t * 1.5) * R * 0.03, 0); // the wrong extra eye
+    var halfW = R * (0.5 + smile * 0.42), curl = R * (0.30 + smile * 0.34), my = R * 0.42;
+    ctx.strokeStyle = "rgba(8,5,6,0.92)"; ctx.lineWidth = Math.max(1.5, R * 0.05); ctx.lineJoin = "round";
+    ctx.beginPath(); ctx.moveTo(-halfW, my - curl); ctx.quadraticCurveTo(0, my + R * 0.18, halfW, my - curl); ctx.stroke();
+    ctx.save(); ctx.beginPath(); ctx.moveTo(-halfW, my - curl); ctx.quadraticCurveTo(0, my + R * 0.18, halfW, my - curl); ctx.lineTo(halfW, my + R * 0.5); ctx.lineTo(-halfW, my + R * 0.5); ctx.closePath(); ctx.clip();
+    var nt = 16; for (var i = 0; i < nt; i++) { var u = i / (nt - 1), tx = (u - 0.5) * 2 * halfW, sm = Math.sin(u * Math.PI), ty = my + R * 0.18 * sm - curl * (1 - sm), tw = (halfW * 2 / nt) * 0.42;
+      poly(ctx, [[tx - tw, ty], [tx + tw, ty], [tx + tw * 0.7, ty + R * 0.22], [tx - tw * 0.7, ty + R * 0.22]], (i % 2) ? "#d9d2bf" : "#c7bfa9"); }
+    ctx.restore();
+    var bg = ctx.createLinearGradient(0, -R * 1.18, 0, -R * 0.3); bg.addColorStop(0, "rgba(2,4,5,0.95)"); bg.addColorStop(1, "rgba(2,4,5,0)");
+    ctx.fillStyle = bg; ctx.fillRect(-R, -R * 1.2, R * 2, R * 0.95);
+    ctx.restore();
+  }
+
+  // ---------- cinematic 3D: low-poly oil rig + DN-7 sub (for the intro cutscene) ----------
+  function boxFaces(x0, y0, z0, x1, y1, z1) { var c = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
+    return [[c[0], c[1], c[2], c[3]], [c[5], c[4], c[7], c[6]], [c[4], c[0], c[3], c[7]], [c[1], c[5], c[6], c[2]], [c[3], c[2], c[6], c[7]], [c[4], c[5], c[1], c[0]]]; }
+  function shearLeg(x, z, ox, oz) { var s = 0.34, ty = 6, by = -2;
+    var T = [[x - s, ty, z - s], [x + s, ty, z - s], [x + s, ty, z + s], [x - s, ty, z + s]], B = [[x - s + ox, by, z - s + oz], [x + s + ox, by, z - s + oz], [x + s + ox, by, z + s + oz], [x - s + ox, by, z + s + oz]];
+    return [[T[0], T[1], B[1], B[0]], [T[1], T[2], B[2], B[1]], [T[2], T[3], B[3], B[2]], [T[3], T[0], B[0], B[3]]]; }
+  function braceQuads(xL, xR, z, y0, y1) { var w = 0.12; return [[[xL, y0, z - w], [xR, y1, z - w], [xR, y1, z + w], [xL, y0, z + w]], [[xR, y0, z - w], [xL, y1, z - w], [xL, y1, z + w], [xR, y0, z + w]]]; }
+  function tetraStruts(ax, ay, az, base, top) { var f = []; for (var i = 0; i < 4; i++) { var a0 = i / 4 * Math.PI * 2, a1 = (i + 1) / 4 * Math.PI * 2; f.push([[ax + Math.cos(a0) * base, ay, az + Math.sin(a0) * base], [ax + Math.cos(a1) * base, ay, az + Math.sin(a1) * base], [ax, ay + top, az]]); } return f; }
+  function drawRigMesh(ctx, proj, t, uw) { uw = uw || 0; var light = v3norm([0.4, 0.7, -0.55]), LO = [14, 19, 25], HI = [82, 96, 108], faces = [], legX = [-3.4, 3.4], legZ = [-2.2, 2.2];
+    for (var lx = 0; lx < 2; lx++) for (var lz = 0; lz < 2; lz++) { var x = legX[lx], z = legZ[lz], bot = (x < 0 ? -0.9 : 0.9), botz = (z < 0 ? -0.6 : 0.6), bx = shearLeg(x, z, bot, botz); for (var f0 = 0; f0 < bx.length; f0++) faces.push(bx[f0]); }
+    faces.push.apply(faces, braceQuads(-3.4, 3.4, -2.2, 1, 5)); faces.push.apply(faces, braceQuads(-3.4, 3.4, 2.2, 1, 5));
+    faces.push.apply(faces, boxFaces(-4.2, 6, -3.0, 4.2, 7.2, 3.0)); faces.push.apply(faces, boxFaces(-2.4, 7.2, -1.6, 1.0, 9.4, 1.4)); faces.push.apply(faces, tetraStruts(2.4, 7.2, 0, 1.4, 6.4));
+    var drawn = []; for (var i = 0; i < faces.length; i++) { var f = faces[i], P = [], ok = true, zc = 0;
+      for (var k = 0; k < f.length; k++) { var pp = proj(f[k]); if (!pp.v) { ok = false; break; } P.push(pp); zc += pp.z; } if (!ok) continue; zc /= f.length;
+      var n = v3norm(v3cross(v3sub(f[1], f[0]), v3sub(f[2], f[0]))), sh = Math.max(0, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]); drawn.push({ P: P, z: zc, sh: sh }); }
+    drawn.sort(function (a, b) { return b.z - a.z; });
+    for (var d = 0; d < drawn.length; d++) { var dn = drawn[d], kf = (0.18 + dn.sh * dn.sh * 0.82) * (1 - uw * 0.55);
+      ctx.fillStyle = "rgb(" + ((LO[0] + (HI[0] - LO[0]) * kf) | 0) + "," + ((LO[1] + (HI[1] - LO[1]) * kf) | 0) + "," + ((LO[2] + (HI[2] - LO[2]) * kf) | 0) + ")";
+      ctx.beginPath(); ctx.moveTo(dn.P[0].x, dn.P[0].y); for (var q = 1; q < dn.P.length; q++) ctx.lineTo(dn.P[q].x, dn.P[q].y); ctx.closePath(); ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = "rgba(2,5,9,0.8)"; ctx.stroke(); }
+    var lp = proj([2.4, 13.6, 0]); if (lp.v && uw < 0.9) { var bl = 0.5 + 0.5 * Math.sin(t * 4); glowDot(ctx, lp.x, lp.y, Math.max(4, lp.s * 0.05), "#ff6452", bl * (1 - uw)); ctx.fillStyle = mix("#220505", "#ff6452", bl); ctx.beginPath(); ctx.arc(lp.x, lp.y, Math.max(2, lp.s * 0.012), 0, 7); ctx.fill(); }
+  }
+  var _dn7 = null;
+  function dn7Mesh() { if (_dn7) return _dn7; var nz = 7, ns = 10, rings = [];
+    for (var i = 0; i < nz; i++) { var u = i / (nz - 1), zz = -1 + u * 2, r = Math.sqrt(Math.max(0, 1 - zz * zz)) * 0.9 + 0.08, ring = []; for (var j = 0; j < ns; j++) { var a = j / ns * Math.PI * 2; ring.push([Math.cos(a) * r, Math.sin(a) * r, zz]); } rings.push(ring); }
+    var faces = []; for (var i2 = 0; i2 < nz - 1; i2++) for (var j2 = 0; j2 < ns; j2++) { var jb = (j2 + 1) % ns; faces.push([rings[i2][j2], rings[i2][jb], rings[i2 + 1][jb], rings[i2 + 1][j2]]); } _dn7 = { faces: faces }; return _dn7; }
+  function drawCableSub(ctx, proj, t, ct) { var CUT = 10.2, cut = ct > CUT, sy = ct < 8.6 ? 5 - (ct / 8.6) * 5 : 0; if (cut) { var fp0 = ct - CUT; sy = 0 - (fp0 * fp0 * 3.0); }
+    var tip = cut ? Math.min(1.3, (ct - CUT) * 0.9) : 0, center = [0, sy, 0], scale = 1.5, top = [center[0], center[1] + 1.4, center[2]], apex = [2.4, 13.6, 0], a = proj(apex), b = proj(top);
+    if (a.v && b.v) { ctx.strokeStyle = "rgba(140,150,160,0.75)"; ctx.lineWidth = Math.max(1.5, b.s * 0.006);
+      if (!cut) { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+      else { var fp = clamp((ct - CUT) * 4, 0, 1), midx = lerp(a.x, b.x, 0.45), midy = lerp(a.y, b.y, 0.45) + fp * 30;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(midx + 10, midy, a.x + 6, a.y + 40 * fp); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.quadraticCurveTo(b.x - 8, b.y - 20 * fp, b.x - 4, b.y - 50 * fp); ctx.stroke(); } }
+    var M = dn7Mesh(), light = v3norm([0.4, 0.6, -0.6]), LO = [26, 32, 40], HI = [96, 110, 122];
+    function wp(v) { var cyq = Math.cos(tip), syq = Math.sin(tip), y = v[1] * cyq - v[2] * syq, z = v[1] * syq + v[2] * cyq; return proj([center[0] + v[0] * scale, center[1] + y * scale, center[2] + z * scale]); }
+    var drawn = []; for (var i = 0; i < M.faces.length; i++) { var f = M.faces[i], P = [wp(f[0]), wp(f[1]), wp(f[2]), wp(f[3])], ok = true, zc = 0; for (var k = 0; k < 4; k++) { if (!P[k].v) { ok = false; break; } zc += P[k].z; } if (!ok) continue; zc /= 4;
+      var n = v3norm(v3cross(v3sub(f[1], f[0]), v3sub(f[2], f[0]))), sh = Math.max(0, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]); drawn.push({ P: P, z: zc, sh: sh }); }
+    drawn.sort(function (x, y) { return y.z - x.z; });
+    for (var d = 0; d < drawn.length; d++) { var dn = drawn[d], kf = 0.2 + dn.sh * dn.sh * 0.8;
+      ctx.fillStyle = "rgb(" + ((LO[0] + (HI[0] - LO[0]) * kf) | 0) + "," + ((LO[1] + (HI[1] - LO[1]) * kf) | 0) + "," + ((LO[2] + (HI[2] - LO[2]) * kf) | 0) + ")";
+      ctx.beginPath(); ctx.moveTo(dn.P[0].x, dn.P[0].y); for (var q = 1; q < 4; q++) ctx.lineTo(dn.P[q].x, dn.P[q].y); ctx.closePath(); ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = "rgba(2,5,9,0.85)"; ctx.stroke(); }
+    var ph = wp([0.5, 0.2, 0.95]); if (ph.v) { glowDot(ctx, ph.x, ph.y, Math.max(2, ph.s * 0.02), PAL.amberHi, 0.8); ctx.fillStyle = PAL.amberHi; ctx.beginPath(); ctx.arc(ph.x, ph.y, Math.max(1.2, ph.s * 0.008), 0, 7); ctx.fill(); }
+  }
+
   root.DN = root.DN || {};
   root.DN.Art = {
     PAL: PAL, rebake: rebake, drawWater: drawWater, drawSonar: drawSonar, drawPortrait: drawPortrait,
@@ -1150,5 +1308,8 @@
     drawForward: drawForward, drawOxygenTank: drawOxygenTank, drawDepthGauge: drawDepthGauge, drawWarnLamp: drawWarnLamp, drawLeak: drawLeak,
     drawPlushie: drawPlushie, drawRig: drawRig, drawAngler3D: drawAngler3D, drawBloop3D: drawBloop3D,
     drawValveWheel: drawValveWheel, drawRadio: drawRadio, drawTitleStamp: drawTitleStamp, bootFlicker: bootFlicker,
+    v3norm: v3norm, facetQuad: facetQuad, consoleHousing: consoleHousing, drawHands: drawHands,
+    drawMutation: drawMutation, drawMutationFace: drawMutationFace,
+    drawRigMesh: drawRigMesh, drawCableSub: drawCableSub,
   };
 })(typeof window !== "undefined" ? window : this);
