@@ -57,11 +57,99 @@
     L.btn.patch = { x: x0 + bw + gap, y: y1, w: bw, h: bs };
     L.btn.crank = { x: x0 + (bw + gap) * 2, y: y0, w: bw, h: bs };
     L.btn.brief = { x: x0 + (bw + gap) * 2, y: y1, w: bw, h: bs };
+    computeStationAnchors();
   }
   function inside(r, p) { return r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; }
   function dpadRects() { var s = L.dpad.s, cx = L.dpad.cx, cy = L.dpad.cy; return {
     up: { x: cx - s / 2, y: cy - s * 1.5, w: s, h: s }, down: { x: cx - s / 2, y: cy + s / 2, w: s, h: s },
     left: { x: cx - s * 1.5, y: cy - s / 2, w: s, h: s }, right: { x: cx + s / 2, y: cy - s / 2, w: s, h: s } }; }
+
+  // ---------------- 3D CABIN: look-around camera + diegetic UI stations ----------------
+  // The dive scene is a cylindrical submarine tube you look around in. Each UI panel is a "station"
+  // anchored in tube-space; camProject() maps an anchor to an axis-aligned screen rect (translate +
+  // uniform scale, NO skew) so the existing rect-based hit-testing stays exact. layoutStations()
+  // rewrites L.* once per render frame from the projected anchors; input reads L.* (never re-projects).
+  var FOV = 1.16;
+  // station rest framing: fx,fy = rest screen position (fraction of W,H); z = tube depth; pw/ph = rest
+  // size (fraction of W,H); pr = radius / ps = cell size (fraction of min(W,H)). Anchors keep the
+  // familiar layout at rest (window top, monitor centre, instruments left, controls bottom).
+  var STA = {
+    window:  { fx: 0.575, fy: 0.27, pw: 0.56, ph: 0.34, z: 1.70 },
+    monitor: { fx: 0.575, fy: 0.635, pw: 0.56, ph: 0.34, z: 1.30 },
+    tank:    { fx: 0.072, fy: 0.39, pw: 0.085, ph: 0.44, z: 1.10 },
+    depth:   { fx: 0.085, fy: 0.83, pr: 0.052, z: 1.05 },
+    bank:    { fx: 0.255, fy: 0.905, pw: 0.42, ph: 0.135, z: 1.02 },
+    dpad:    { fx: 0.865, fy: 0.90, ps: 0.05, z: 1.02 },
+    valve:   { fx: 0.935, fy: 0.55, pr: 0.075, z: 0.98 },
+    brief:   { fx: 0.965, fy: 0.09, pw: 0.05, ph: 0.06, z: 1.45 }
+  };
+  function computeStationAnchors() { // back out tube-space anchors from the rest screen framing (aspect-robust)
+    var focal = (W * 0.5) / Math.tan(FOV / 2), m = Math.min(W, H);
+    for (var k in STA) { var S = STA[k]; var sx = S.fx * W, sy = S.fy * H, z = S.z;
+      S.a = [(sx - W / 2) * z / focal, (H / 2 - sy) * z / focal, z]; S.restScale = focal / z;
+      S.rw = (S.pw || 0) * W; S.rh = (S.ph || 0) * H; S.rr = (S.pr || 0) * m; S.rsz = (S.ps || 0) * m; }
+  }
+  // project a tube-space anchor through the look camera (inverse-camera rotation -> correct parallax)
+  function camProject(ax, ay, az) {
+    var c = G.cam, yaw = c.yaw + c._swayY, pitch = c.pitch + c._swayP;
+    var cyw = Math.cos(yaw), syw = Math.sin(yaw);
+    var x = ax * cyw - az * syw, z = ax * syw + az * cyw;          // yaw about Y (look right -> world slides left)
+    var cp = Math.cos(pitch), sp = Math.sin(pitch);
+    var y = ay * cp + z * sp; z = -ay * sp + z * cp;                // pitch about X (look down -> forward rises)
+    if (z < 0.06) return { visible: false, z: z };
+    var focal = (W * 0.5) / Math.tan(FOV / 2), f = focal / z;
+    return { visible: true, sx: W / 2 + x * f, sy: H / 2 - y * f, scale: f, z: z };
+  }
+  var OFF = { x: -99999, y: -99999, w: 0, h: 0 };
+  function layoutStations() {
+    var c = G.cam;
+    // render-only idle breathing sway (never persisted) so the cabin is never frozen
+    if (c.active < 0.05 && !G.lock && !G.scare) { c._swayY = Math.sin(c.idle) * 0.012; c._swayP = Math.sin(c.idle * 0.77 + 1.3) * 0.009; }
+    else { c._swayY = 0; c._swayP = 0; }
+    for (var k in STA) { var S = STA[k]; var pr = camProject(S.a[0], S.a[1], S.a[2]); S.scr = pr; S.mul = pr.visible ? pr.scale / S.restScale : 0; }
+    function rectOf(S) { if (!S.scr.visible) return { x: OFF.x, y: OFF.y, w: 0, h: 0 }; var w = S.rw * S.mul, h = S.rh * S.mul; return { x: S.scr.sx - w / 2, y: S.scr.sy - h / 2, w: w, h: h }; }
+    L.porthole = rectOf(STA.window);
+    // monitor: clamp on-screen width so minesweeper cells stay tappable
+    var mr = rectOf(STA.monitor);
+    if (mr.w > 4) { var cw = clamp(mr.w, W * 0.30, W * 0.94), f2 = cw / mr.w; var ncx = mr.x + mr.w / 2, ncy = mr.y + mr.h / 2; mr = { x: ncx - cw / 2, y: ncy - mr.h * f2 / 2, w: cw, h: mr.h * f2 }; }
+    L.monitor = mr;
+    L.tank = rectOf(STA.tank);
+    L.depth = STA.depth.scr.visible ? { cx: STA.depth.scr.sx, cy: STA.depth.scr.sy, r: STA.depth.rr * STA.depth.mul } : { cx: OFF.x, cy: OFF.y, r: 1 };
+    // button bank -> 2x2 (ping/light | secure/patch)
+    var b = rectOf(STA.bank), sc = STA.bank.mul || 0, gap = 7 * sc;
+    if (b.w > 4) { var bw2 = (b.w - gap) / 2, bh2 = (b.h - gap) / 2;
+      L.btn.ping = { x: b.x, y: b.y, w: bw2, h: bh2 };
+      L.btn.light = { x: b.x, y: b.y + bh2 + gap, w: bw2, h: bh2 };
+      L.btn.excavate = { x: b.x + bw2 + gap, y: b.y, w: bw2, h: bh2 };
+      L.btn.patch = { x: b.x + bw2 + gap, y: b.y + bh2 + gap, w: bw2, h: bh2 };
+    } else { L.btn.ping = L.btn.light = L.btn.excavate = L.btn.patch = OFF; }
+    // crank = the valve wheel (hit rect = wheel bbox)
+    if (STA.valve.scr.visible) { var vr = STA.valve.rr * STA.valve.mul, vc = STA.valve.scr; L.btn.crank = { x: vc.sx - vr, y: vc.sy - vr, w: 2 * vr, h: 2 * vr }; } else L.btn.crank = OFF;
+    L.btn.brief = rectOf(STA.brief);
+    L.dpad = STA.dpad.scr.visible ? { cx: STA.dpad.scr.sx, cy: STA.dpad.scr.sy, s: STA.dpad.rsz * STA.dpad.mul } : { cx: OFF.x, cy: OFF.y, s: 1 };
+  }
+  function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+  function updateCamera(s) { // critically-damped look spring (no overshoot -> no nausea) + auto-return home
+    var c = G.cam, KY = 0.62, KU = 0.34, KD = 0.40;
+    c.tgtYaw = clamp(c.tgtYaw, -KY, KY); c.tgtPitch = clamp(c.tgtPitch, -KU, KD);
+    var k = 120, cd = 21.9;
+    c.vYaw += (k * (c.tgtYaw - c.yaw) - cd * c.vYaw) * s; c.yaw += c.vYaw * s;
+    c.vPitch += (k * (c.tgtPitch - c.pitch) - cd * c.vPitch) * s; c.pitch += c.vPitch * s;
+    c.active = Math.max(0, c.active - s * 1.5); c.idle += s * 0.55;
+    if (c.active < 0.05) { var e = Math.min(1, s * 1.8 * (G.leak > 0.5 ? 0.55 : 1)); c.tgtYaw += (0 - c.tgtYaw) * e; c.tgtPitch += (0 - c.tgtPitch) * e; }
+  }
+  function spawnPassby(fast) { // a creature drifting across the window glass
+    var shape = "angler";
+    for (var i = 0; i < G.cells.length; i++) { var cc = G.cells[i]; if (cc.mon && !cc.triggered && Math.abs(cc.x - G.sub.cx) + Math.abs(cc.y - G.sub.cy) <= 3 && MON[cc.monId] && MON[cc.monId].shape === "bloop") { shape = "bloop"; break; } }
+    G.passby = { shape: shape, side: G.rng.chance(0.5) ? 1 : -1, depth: G.rng.range(3.6, 6), y: G.rng.range(-0.25, 0.3), t: 0, dur: fast ? G.rng.range(1.0, 1.4) : G.rng.range(2.2, 2.8), fast: !!fast };
+  }
+  function updatePassby(s) { // sneaky, rare when safe, more frequent when hunted; one at a time
+    if (G.passby) { G.passby.t += s; if (G.passby.t >= G.passby.dur) G.passby = null; return; }
+    G.passT -= s; if (G.passT > 0) return;
+    var nd = nearestMonDist(), danger = clamp((G.threat / 100) * 0.6 + (nd <= 3 ? (4 - nd) / 4 * 0.8 : 0), 0, 1);
+    if (G.rng.chance(danger * 0.8)) spawnPassby(false);
+    G.passT = G.rng.range(2.6, 6.5) - danger * 3;
+  }
 
   // ---------------- state ----------------
   var G = null;
@@ -74,7 +162,10 @@
       lightOn: false, transit: null, stalker: null, woke: false, confirmDir: null,
       leak: 0, scare: null, snow: [], flash: 0, flashCol: "180,40,40", shake: 0, hbT: 0, heartbeat: 0,
       lamp: { o2: 0, hull: 0, wake: 0 }, endKind: null, won: false, menuSel: 0, padActive: false,
-      hatch: { x: 0, y: 0 }, start: { x: 0, y: 0 }, loreSeen: [], pingFlash: 0, sweep: 0 };
+      hatch: { x: 0, y: 0 }, start: { x: 0, y: 0 }, loreSeen: [], pingFlash: 0, sweep: 0,
+      // look-around camera (eased yaw/pitch); shake is NEVER written here (kept transient in render)
+      cam: { yaw: 0, pitch: 0, vYaw: 0, vPitch: 0, tgtYaw: 0, tgtPitch: 0, idle: 0, active: 0, lastLook: -9, _swayY: 0, _swayP: 0 },
+      passby: null, passT: 4, valveAngle: 0, valveSpin: 0, leakStep: 0 };
   }
   function fmt(t, o) { return String(t).replace(/\{(\w+)\}/g, function (m, key) { return o && o[key] != null ? o[key] : ""; }); }
   function cell(x, y) { return (x < 0 || y < 0 || x >= G.gw || y >= G.gh) ? null : G.cells[y * G.gw + x]; }
@@ -155,7 +246,9 @@
       dest.mon = true; dest.monId = mid; dest.flagged = false;
       moved = true;
     }
-    if (moved) { recomputeNumbers(); G.lamp.wake = Math.max(G.lamp.wake, 0.7); Audio.alert(); G.flash = Math.max(G.flash, 0.16); G.flashCol = "120,40,160"; }
+    if (moved) { recomputeNumbers(); G.lamp.wake = Math.max(G.lamp.wake, 0.7); Audio.alert(); G.flash = Math.max(G.flash, 0.16); G.flashCol = "120,40,160";
+      if (OPT.shake) G.shake = Math.max(G.shake, 4.5); // the creatures shifting thumps the hull
+      if (!G.passby && nearestMonDist() <= 3) spawnPassby(true); } // and one darts past the glass
     return moved;
   }
 
@@ -226,6 +319,7 @@
   function crank() { // the winch: descend on the hatch, breach on the Source, otherwise reel UP to the rig
     if (G.scene !== "dive" || G.transit || G.scare) return; var c = curCell();
     if (G.lock) return;
+    G.valveSpin = (c && c.hatch) ? 9 : (c && c.source) ? 9 : -7; // visual: spin the wheel
     if (c && c.source) { winRun(); return; }
     if (c && c.hatch) { descend(); return; }
     surface();
@@ -269,6 +363,8 @@
     var rush = G.transit ? 14 : 1.5;
     for (var i = 0; i < G.snow.length; i++) { var p = G.snow[i]; p.rz -= rush * s; if (p.rz < 0.5) { var ns = newSnow(false); p.rx = ns.rx; p.ry = ns.ry; p.rz = ns.rz; } }
     if (G.scene !== "dive") return;
+    updateCamera(s); // look-around spring runs every dive frame (incl. lock + scare) so the view never freezes
+    G.valveAngle += G.valveSpin * s; G.valveSpin += (0 - G.valveSpin) * Math.min(1, s * 4);
 
     if (G.transit) { G.transit.t += s / CFG.moveGlide; if (G.transit.t >= 1) resolveArrive(G.transit); }
 
@@ -288,6 +384,9 @@
     if (G.threat >= CFG.wake) G.lamp.wake = Math.max(G.lamp.wake, 0.5);
     // smooth leak severity toward hull damage (bilge pump keeps the cabin drier)
     var target = (1 - G.hull / effMaxHull()) * bilgeMult(); G.leak += (target - G.leak) * Math.min(1, s * 2);
+    updatePassby(s); // sneaky creatures drift past the window
+    // a new seam bursts as the cabin floods deeper — a thump + a cold flash
+    var lstep = Math.floor(G.leak * 10); if (lstep > G.leakStep) { if (OPT.shake) G.shake = Math.max(G.shake, 3); G.flash = Math.max(G.flash, 0.18); G.flashCol = "120,160,170"; } G.leakStep = lstep;
     // heartbeat from a nearby (unrevealed) Angler / low hull / low air
     var nd = nearestMonDist(); var hbScare = nd <= 3 ? clamp(1 - (nd - 1) / 3, 0, 1) : 0;
     G.heartbeat = Math.max(hbScare, G.leak > 0.7 ? G.leak : 0, G.oxygen < effMaxOxygen() * 0.12 ? 0.6 : 0);
@@ -333,26 +432,95 @@
     return out;
   }
 
+  // the cylindrical steel cabin: projected rib rings + shaded wall strips + pipes + grating + caged lamps
+  var TUBE_Z = [0.30, 0.55, 0.9, 1.4, 2.0, 2.8, 3.8, 5.2], TUBE_R = 1.44, TUBE_NS = 16;
+  function drawTube(yaw, pitch) {
+    var g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#10161d"); g.addColorStop(0.5, "#0a0f15"); g.addColorStop(1, "#05080c");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    var focal = (W * 0.5) / Math.tan(FOV / 2), cyw = Math.cos(yaw), syw = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+    function proj(a, zc) { var wx = Math.cos(a) * TUBE_R, wy = Math.sin(a) * TUBE_R;
+      var x = wx * cyw - zc * syw, z = wx * syw + zc * cyw; var y = wy * cp + z * sp; z = -wy * sp + z * cp;
+      if (z < 0.06) z = 0.06; var f = focal / z; return [W / 2 + x * f, H / 2 - y * f, z]; }
+    function fog(z) { return clamp(1 - (z - 0.3) / 5.2, 0.1, 1); }
+    var amb = G.lightOn ? 1.0 : 0.6;
+    // wall strips far -> near (painter)
+    for (var ri = TUBE_Z.length - 2; ri >= 0; ri--) { var zN = TUBE_Z[ri], zF = TUBE_Z[ri + 1], fg = fog(zF);
+      for (var j = 0; j < TUBE_NS; j++) { var a0 = j / TUBE_NS * Math.PI * 2, a1 = (j + 1) / TUBE_NS * Math.PI * 2, am = (a0 + a1) / 2;
+        var p0 = proj(a0, zN), p1 = proj(a1, zN), p2 = proj(a1, zF), p3 = proj(a0, zF);
+        var nb = Math.max(0, -Math.sin(am)); // 1 at floor (bottom), 0 at ceiling — floor lit by ceiling lamp
+        var b = (0.14 + 0.62 * nb * nb) * fg * amb; if (b > 1) b = 1;
+        var col = nb > 0.45 ? "rgb(" + ((20 + 44 * b) | 0) + "," + ((30 + 56 * b) | 0) + "," + ((26 + 46 * b) | 0) + ")"
+                            : "rgb(" + ((26 + 62 * b) | 0) + "," + ((30 + 68 * b) | 0) + "," + ((37 + 74 * b) | 0) + ")";
+        ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.lineTo(p3[0], p3[1]); ctx.closePath(); ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.stroke(); } }
+    // rib rings + rivets
+    for (var ki = 0; ki < TUBE_Z.length; ki++) { var zc = TUBE_Z[ki], fr = fog(zc);
+      ctx.strokeStyle = "rgba(120,200,205," + (0.05 + fr * 0.20).toFixed(3) + ")"; ctx.lineWidth = 1; ctx.beginPath();
+      for (var jr = 0; jr <= TUBE_NS; jr++) { var pp = proj(jr % TUBE_NS / TUBE_NS * Math.PI * 2, zc); if (jr === 0) ctx.moveTo(pp[0], pp[1]); else ctx.lineTo(pp[0], pp[1]); } ctx.stroke();
+      if (zc < 3) { ctx.fillStyle = "rgba(150,160,170," + (fr * 0.5).toFixed(3) + ")"; for (var jv = 0; jv < TUBE_NS; jv += 2) { var pv = proj(jv / TUBE_NS * Math.PI * 2, zc); ctx.beginPath(); ctx.arc(pv[0], pv[1], Math.max(0.8, 2 * fr), 0, 7); ctx.fill(); } } }
+    // ceiling pipes (longitudinal)
+    var pipes = [Math.PI / 2 - 0.34, Math.PI / 2, Math.PI / 2 + 0.34];
+    for (var pi = 0; pi < pipes.length; pi++) { var pa = pipes[pi];
+      ctx.strokeStyle = PAL.steel; ctx.lineWidth = 2; ctx.beginPath();
+      for (var zi = 0; zi < TUBE_Z.length; zi++) { var pp2 = proj(pa, TUBE_Z[zi]); if (zi === 0) ctx.moveTo(pp2[0], pp2[1]); else ctx.lineTo(pp2[0], pp2[1]); } ctx.stroke();
+      ctx.strokeStyle = PAL.steelHi; ctx.lineWidth = 1; ctx.beginPath();
+      for (var zi2 = 0; zi2 < TUBE_Z.length; zi2++) { var pp3 = proj(pa, TUBE_Z[zi2]); if (zi2 === 0) ctx.moveTo(pp3[0], pp3[1] - 1); else ctx.lineTo(pp3[0], pp3[1] - 1); } ctx.stroke(); }
+    // floor grating rungs
+    ctx.strokeStyle = "rgba(70,92,80,0.45)"; ctx.lineWidth = 1;
+    for (var zg = 1; zg < TUBE_Z.length; zg++) { var bl = proj(-Math.PI / 2 - 0.55, TUBE_Z[zg]), br = proj(-Math.PI / 2 + 0.55, TUBE_Z[zg]); ctx.beginPath(); ctx.moveTo(bl[0], bl[1]); ctx.lineTo(br[0], br[1]); ctx.stroke(); }
+    // caged ceiling lamps (the light sources)
+    var lampZ = [1.0, 2.5];
+    for (var li = 0; li < lampZ.length; li++) { var lp = proj(Math.PI / 2, lampZ[li]), lr = Math.max(4, 22 / lampZ[li]);
+      Art.glowDot(ctx, lp[0], lp[1], lr * 1.6, PAL.amberHi, G.lightOn ? 0.7 : 0.4);
+      ctx.fillStyle = G.lightOn ? "#ffe6a8" : "#5c5230"; ctx.beginPath(); ctx.arc(lp[0], lp[1], lr * 0.4, 0, 7); ctx.fill();
+      ctx.strokeStyle = "rgba(20,24,28,0.7)"; ctx.lineWidth = 1; for (var cg = -1; cg <= 1; cg++) { ctx.beginPath(); ctx.moveTo(lp[0] + cg * lr * 0.4, lp[1] - lr * 0.4); ctx.lineTo(lp[0] + cg * lr * 0.4, lp[1] + lr * 0.4); ctx.stroke(); } }
+    // murk swallowing the far end of the tube
+    var fcp = proj(0, TUBE_Z[TUBE_Z.length - 1]); var hz = ctx.createRadialGradient(fcp[0], fcp[1], 2, fcp[0], fcp[1], H * 0.45);
+    hz.addColorStop(0, "rgba(5,11,15,0.88)"); hz.addColorStop(1, "rgba(5,11,15,0)"); ctx.fillStyle = hz; ctx.fillRect(0, 0, W, H);
+  }
+  // a creature swimming PAST the window glass — sneaky, lit at centre, lost in murk at the frame edges
+  function drawPassby(pb, win) {
+    if (!pb || win.w < 4) return; var u = pb.t / pb.dur;
+    var rx = pb.side * 8 - pb.side * 16 * smooth(u), ry = pb.y + Math.sin(pb.t * 2.1) * 0.12, rz = pb.depth + Math.sin(pb.t * 1.3) * 0.4;
+    if (rz < 0.6) return; var focal = win.w * 0.5 / Math.tan(1.2 / 2);
+    var sx = win.x + win.w / 2 + (rx / rz) * focal, sy = win.y + win.h / 2 + (ry / rz) * focal, sz = Math.min(win.h * 0.95, (focal * 1.7) / rz);
+    var lit = (G.lightOn ? 0.5 : 0.22) * smooth(1 - Math.abs(u - 0.5) * 2);
+    ctx.save(); ctx.beginPath(); Art.rrect(ctx, win.x, win.y, win.w, win.h, 10); ctx.clip();
+    if (pb.shape === "bloop") Art.drawBloop3D(ctx, sx, sy, sz * 0.85, { yaw: pb.side * 1.2 + Math.sin(G.time * 0.6) * 0.2, pitch: -0.05, mouth: 0.2 + 0.1 * Math.sin(G.time), t: G.time, lit: lit });
+    else Art.drawAngler3D(ctx, sx, sy, sz * 0.6, { yaw: pb.side * 1.3 + Math.sin(G.time * 0.8) * 0.25, pitch: -0.08, mouth: 0.16, t: G.time, lit: lit });
+    ctx.restore();
+  }
+
   function renderDive() {
-    drawCockpitBG();
-    // forward porthole
+    layoutStations();
+    // hull shake = a screen-space translate of the WHOLE rigid cabin (never written into look angles)
+    var sh = OPT.shake ? G.shake : 0, F = 38;
+    var shx = sh ? (Math.sin(G.time * F) * 0.6 + (Math.random() - 0.5)) * sh * 0.8 : 0;
+    var shy = sh ? (Math.cos(G.time * F * 0.9) * 0.6 + (Math.random() - 0.5)) * sh * 0.8 : 0;
+    var c = G.cam, camYaw = c.yaw + c._swayY, camPitch = c.pitch + c._swayP;
+    ctx.save(); ctx.translate(shx, shy);
+    drawTube(camYaw, camPitch);
+    // the WINDOW (look out): the 3D trench buffer composited at the camera-driven porthole, monsters swimming past
     renderForwardBuffer();
-    var shx = G.shake ? (Math.random() - 0.5) * G.shake : 0, shy = G.shake ? (Math.random() - 0.5) * G.shake : 0;
-    var ph = L.porthole; ctx.save(); ctx.beginPath(); Art.rrect(ctx, ph.x, ph.y, ph.w, ph.h, 10); ctx.clip();
-    ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, ph.x + shx, ph.y + shy, ph.w, ph.h); ctx.restore();
-    portholeBezel(ph);
-    drawCabinPlushies();
-    // monitor grid
+    var ph = L.porthole;
+    if (ph.w > 4 && ph.h > 4) {
+      ctx.save(); ctx.beginPath(); Art.rrect(ctx, ph.x, ph.y, ph.w, ph.h, 10); ctx.clip();
+      ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, ph.x, ph.y, ph.w, ph.h);
+      if (G.passby) drawPassby(G.passby, ph);
+      ctx.restore();
+      portholeBezel(ph); drawCabinPlushies();
+    }
     drawMonitor();
     if (G.lock) drawLock();
-    // instruments
-    Art.drawOxygenTank(ctx, L.tank.x, L.tank.y, L.tank.w, L.tank.h, G.oxygen / CFG.startOxygen, G.time);
-    Art.drawDepthGauge(ctx, L.depth.cx, L.depth.cy, L.depth.r, clamp(G.layer / CFG.layers, 0, 1), G.time);
+    if (L.tank.w > 2) Art.drawOxygenTank(ctx, L.tank.x, L.tank.y, L.tank.w, L.tank.h, G.oxygen / CFG.startOxygen, G.time);
+    if (L.depth.r > 2 && L.depth.cx > -9000) Art.drawDepthGauge(ctx, L.depth.cx, L.depth.cy, L.depth.r, clamp(G.layer / CFG.layers, 0, 1), G.time);
+    // the crank is a physical valve wheel
+    var vc = STA.valve.scr;
+    if (vc && vc.visible) { var oc0 = curCell(); Art.drawValveWheel(ctx, vc.sx, vc.sy, STA.valve.rr * STA.valve.mul, { ang: G.valveAngle, t: G.time, lit: G.lightOn ? 1 : 0.7, active: !!(oc0 && (oc0.hatch || oc0.source)) }); }
     drawLamps(); drawControls();
-    // jumpscare on top
+    ctx.restore();
+    // jumpscare / flooding / grain are screen-space (no camera, no shake transform)
     if (G.scare) drawScare();
-    // diegetic hull = flooding cabin (drawn over everything except scanlines)
-    Art.drawLeak(ctx, W, H, clamp(G.leak, 0, 1), G.time);
+    else Art.drawLeak(ctx, W, H, clamp(G.leak, 0, 1), G.time);
     Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, flash: G.flash, flashCol: G.flashCol });
     if (G.heartbeat > 0.25) { ctx.fillStyle = "rgba(150,20,30," + (G.heartbeat * 0.16).toFixed(3) + ")"; ctx.fillRect(0, 0, W, H); }
   }
@@ -429,8 +597,7 @@
     var narrow = L.btn.excavate.w < 88;
     Art.button(ctx, L.btn.excavate, G.lock ? "LOCK!" : (narrow ? "SIG" : "SECURE"), { primary: G.lock || G.onLoot, hover: UI.hover === "excavate", disabled: !G.lock && !G.onLoot });
     Art.button(ctx, L.btn.patch, (narrow ? "FIX " : "PATCH ") + G.patches, { hover: UI.hover === "patch", disabled: G.patches <= 0 || G.hull >= effMaxHull() });
-    var oc = curCell(); var cl = (oc && oc.source) ? "BREACH" : (oc && oc.hatch) ? "DIVE ▼" : "RISE ▲";
-    Art.button(ctx, L.btn.crank, cl, { primary: !!(oc && (oc.hatch || oc.source)), hover: UI.hover === "crank" });
+    // crank is the diegetic VALVE WHEEL (drawn in renderDive); no flat crank button here.
     Art.button(ctx, L.btn.brief, "?", { hover: UI.hover === "brief" });
     var d = dpadRects();
     Art.button(ctx, d.up, "▲", { hover: UI.hover === "up" }); Art.button(ctx, d.down, "▼", { hover: UI.hover === "down" });
@@ -598,14 +765,42 @@
     for (var m = 0; m < UI.menu.length; m++) if (inside(UI.menu[m].r, p)) UI.hover = "m" + m;
   }
 
-  canvas.addEventListener("mousedown", function (e) { onDown(pt(e)); });
-  canvas.addEventListener("mousemove", function (e) { onHover(pt(e)); });
+  // look-around: dragging an EMPTY part of the cabin pans the camera; pressing a control still acts.
+  var drag = { down: false, look: false, lx: 0, ly: 0, moved: 0 };
+  function overControl(p) { // is this point on an interactive station? (then it's a tap, never a look-drag)
+    if (!G || G.scene !== "dive" || UI.overlay) return false;
+    var b = L.btn; if (inside(b.ping, p) || inside(b.light, p) || inside(b.excavate, p) || inside(b.patch, p) || inside(b.crank, p) || inside(b.brief, p)) return true;
+    var d = dpadRects(); for (var k in d) if (inside(d[k], p)) return true;
+    return false;
+  }
+  function applyLook(dx, dy) { var c = G.cam; c.tgtYaw = clamp(c.tgtYaw - dx * 0.0026, -0.62, 0.62); c.tgtPitch = clamp(c.tgtPitch - dy * 0.0026, -0.34, 0.40); c.active = 1; c.lastLook = G.time; }
+  function canLook(p) { return G && G.scene === "dive" && !UI.overlay && !G.lock && !G.scare && !overControl(p) && !gridCellAt(p); }
+
+  canvas.addEventListener("mousedown", function (e) { var p = pt(e); drag.down = true; drag.lx = p.x; drag.ly = p.y; drag.moved = 0;
+    if (canLook(p)) drag.look = true; else { drag.look = false; onDown(p); } });
+  canvas.addEventListener("mousemove", function (e) { var p = pt(e);
+    if (drag.down && drag.look) { var dx = p.x - drag.lx, dy = p.y - drag.ly; drag.lx = p.x; drag.ly = p.y; drag.moved += Math.abs(dx) + Math.abs(dy); if (drag.moved > 8) applyLook(dx, dy); }
+    else onHover(p); });
+  canvas.addEventListener("mouseup", function () { drag.down = false; drag.look = false; });
+  canvas.addEventListener("mouseleave", function () { drag.down = false; drag.look = false; });
   canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); if (G && G.scene === "dive" && !UI.overlay) { var gc = gridCellAt(pt(e)); if (gc) flagCell(cell(gc.x, gc.y)); } });
-  canvas.addEventListener("touchstart", function (e) { e.preventDefault(); var p = pt(e); holdFired = false; holdCell = (G && G.scene === "dive" && !UI.overlay) ? gridCellAt(p) : null;
+
+  canvas.addEventListener("touchstart", function (e) { e.preventDefault(); var p = pt(e); holdFired = false;
+    drag.down = true; drag.look = false; drag.acted = false; drag.lx = p.x; drag.ly = p.y; drag.moved = 0;
+    holdCell = (G && G.scene === "dive" && !UI.overlay) ? gridCellAt(p) : null;
     if (holdCell) { var hc = holdCell; holdTimer = setTimeout(function () { holdFired = true; flagCell(cell(hc.x, hc.y)); }, 380); }
-    if (!holdCell) onDown(p); }, { passive: false });
-  canvas.addEventListener("touchmove", function (e) { e.preventDefault(); if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } }, { passive: false });
-  canvas.addEventListener("touchend", function (e) { e.preventDefault(); if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } if (holdFired) return; onDown(pt(e)); }, { passive: false });
+    else if (canLook(p)) drag.look = true;       // empty cabin -> look candidate (acts on touchend if no drag)
+    else { onDown(p); drag.acted = true; }        // a control -> act immediately
+  }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) { e.preventDefault(); var p = pt(e);
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+    if (drag.down && drag.look) { var dx = p.x - drag.lx, dy = p.y - drag.ly; drag.lx = p.x; drag.ly = p.y; drag.moved += Math.abs(dx) + Math.abs(dy); if (drag.moved > 12) applyLook(dx, dy); }
+  }, { passive: false });
+  canvas.addEventListener("touchend", function (e) { e.preventDefault(); if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+    var wasLook = drag.look && drag.moved > 12, hc = holdCell, acted = drag.acted; drag.down = false; drag.look = false; drag.acted = false; holdCell = null;
+    if (holdFired || wasLook || acted) return;   // flagged / looked / control already acted
+    onDown(pt(e));                                // grid-cell tap drives; empty tap is a harmless no-op
+  }, { passive: false });
 
   window.addEventListener("keydown", function (e) {
     var code = e.code; if (!G) return;
@@ -641,6 +836,10 @@
           if (pressed(12) || (ax[1] < -0.5 && !padPrev._u)) tryDrive(0, -1); if (pressed(13) || (ax[1] > 0.5 && !padPrev._d)) tryDrive(0, 1);
           if (pressed(14) || (ax[0] < -0.5 && !padPrev._l)) tryDrive(-1, 0); if (pressed(15) || (ax[0] > 0.5 && !padPrev._r)) tryDrive(1, 0);
           if (pressed(0)) ping(); if (pressed(2)) flagFaced(); if (pressed(1)) toggleLight(); if (pressed(3)) secure(); if (pressed(4)) patch(); if (pressed(5)) crank(); if (pressed(9)) UI.overlay = "help";
+          // right stick = look around the cabin
+          var rxx = ax[2] || 0, ryy = ax[3] || 0;
+          if (Math.abs(rxx) > 0.14) { G.cam.tgtYaw = clamp(G.cam.tgtYaw + rxx * 2.4 * STEP / 1000, -0.62, 0.62); G.cam.active = 1; G.cam.lastLook = G.time; }
+          if (Math.abs(ryy) > 0.14) { G.cam.tgtPitch = clamp(G.cam.tgtPitch + ryy * 2.0 * STEP / 1000, -0.34, 0.40); G.cam.active = 1; G.cam.lastLook = G.time; }
         }
         padPrev._u = ax[1] < -0.5; padPrev._d = ax[1] > 0.5; padPrev._l = ax[0] < -0.5; padPrev._r = ax[0] > 0.5;
       } else if (G.scene === "rig") {

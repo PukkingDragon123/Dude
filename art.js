@@ -985,6 +985,34 @@
     if (cache.grain) { ctx.globalAlpha = 0.3; ctx.drawImage(cache.grain, 0, 0, w, h); ctx.globalAlpha = 1; }
   }
 
+  // ---------- the CRANK: a physical valve wheel mounted in the cabin (diegetic; spins when you crank) ----------
+  // o: { ang (radians), t, lit(0..1), active(bool — pulses to invite a crank when on hatch/source) }
+  function drawValveWheel(ctx, cx, cy, r, o) {
+    o = o || {}; var ang = o.ang || 0, t = o.t || 0, lit = o.lit == null ? 1 : o.lit, active = o.active;
+    if (r < 3) return;
+    ctx.save(); ctx.translate(cx, cy);
+    // shadow pooling behind the wheel
+    var sg = ctx.createRadialGradient(0, 0, r * 0.2, 0, 0, r * 1.5); sg.addColorStop(0, "rgba(0,0,0,0.5)"); sg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(0, 0, r * 1.5, 0, 7); ctx.fill();
+    // mounting plate + bolts (fixed, does not spin)
+    ctx.fillStyle = PAL.steelLo; ctx.beginPath(); ctx.arc(0, 0, r * 1.16, 0, 7); ctx.fill();
+    ctx.strokeStyle = "#05080c"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, r * 1.16, 0, 7); ctx.stroke();
+    ctx.fillStyle = PAL.rivet; for (var bi = 0; bi < 6; bi++) { var ba = bi / 6 * Math.PI * 2; ctx.beginPath(); ctx.arc(Math.cos(ba) * r * 1.02, Math.sin(ba) * r * 1.02, Math.max(1.3, r * 0.07), 0, 7); ctx.fill(); }
+    // invite glow when the wheel actually does something here
+    if (active) { var pa = 0.45 + 0.55 * Math.sin(t * 5); ctx.save(); ctx.globalAlpha = pa * 0.6; glowDot(ctx, 0, 0, r * 1.5, PAL.bioHi, 1); ctx.restore(); }
+    // the wheel (spins by ang)
+    ctx.rotate(ang);
+    var k = 0.5 + lit * 0.5;
+    ctx.lineWidth = Math.max(3, r * 0.2); ctx.strokeStyle = mix(PAL.steelLo, PAL.steelHi, k); ctx.beginPath(); ctx.arc(0, 0, r * 0.82, 0, 7); ctx.stroke();
+    ctx.strokeStyle = PAL.steelHi; ctx.lineWidth = Math.max(1, r * 0.05); ctx.beginPath(); ctx.arc(0, 0, r * 0.82, -0.7, 0.95); ctx.stroke(); // rim highlight
+    for (var i = 0; i < 5; i++) { var a = i / 5 * Math.PI * 2;
+      ctx.strokeStyle = PAL.steel; ctx.lineWidth = Math.max(3, r * 0.16); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * r * 0.78, Math.sin(a) * r * 0.78); ctx.stroke();
+      ctx.strokeStyle = PAL.steelHi; ctx.lineWidth = Math.max(1, r * 0.045); ctx.beginPath(); ctx.moveTo(Math.cos(a) * r * 0.1, Math.sin(a) * r * 0.1); ctx.lineTo(Math.cos(a) * r * 0.76, Math.sin(a) * r * 0.76); ctx.stroke(); }
+    ctx.fillStyle = mix(PAL.steelLo, PAL.steel, k); ctx.beginPath(); ctx.arc(0, 0, r * 0.22, 0, 7); ctx.fill();
+    ctx.fillStyle = PAL.rivet; ctx.beginPath(); ctx.arc(0, 0, r * 0.1, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+
   root.DN = root.DN || {};
   root.DN.Art = {
     PAL: PAL, rebake: rebake, drawWater: drawWater, drawSonar: drawSonar, drawPortrait: drawPortrait,
@@ -993,5 +1021,6 @@
     drawGrid: drawGrid, drawCell: drawCell, lootGlyph: lootGlyph, numColor: numColor, glowDot: glowDot, textCentered: textCentered,
     drawForward: drawForward, drawOxygenTank: drawOxygenTank, drawDepthGauge: drawDepthGauge, drawWarnLamp: drawWarnLamp, drawLeak: drawLeak,
     drawPlushie: drawPlushie, drawRig: drawRig, drawAngler3D: drawAngler3D, drawBloop3D: drawBloop3D,
+    drawValveWheel: drawValveWheel,
   };
 })(typeof window !== "undefined" ? window : this);

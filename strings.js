@@ -30,9 +30,10 @@
       "FLAG a cell you suspect; the sub refuses to drive into it until you insist. Drive into an Angler and it lunges — hull damage, and the cabin floods. Far below stirs THE BLOOP: vast, and patient.",
       "Loot is SIGNALS. Drive onto one and SECURE it: a radar mini-game — catch the jammed signal in the capture window before the timer, while it broadcasts your position into the dark.",
       "No number gauges. Watch the AIR cylinder fall and the WATER rise. Surface to the rig to bank signals and buy gear + plushies. At zero air or a drowned cabin, the dive ends.",
+      "You sit inside the steel tube. LOOK AROUND the cabin — drag an empty part of the hull — to read the gauges, the depth dial, and the VALVE WHEEL you CRANK to dive or surface. Watch the window: things swim past the glass.",
       "Six layers down lies the Source. Reach it — if the math holds and the dark stays asleep.",
     ],
-    help_controls: "DRIVE: W A S D / arrows.  PING: Space.  FLAG: F.  LIGHT: L.  CONFIRM / HATCH: E or Enter.  Touch: tap an adjacent cell to drive, hold a cell to flag.  Gamepad supported.",
+    help_controls: "DRIVE: W A S D / arrows.  PING: Space.  FLAG: F.  LIGHT: L.  SECURE: E.  CRANK: C.  PATCH: P.  LOOK: drag the hull / right stick.  Touch: tap a control, tap a cell to drive, hold to flag, drag the hull to look.  Gamepad supported.",
 
     options_title: "SYSTEMS",
     opt_sound: "SOUND",
