@@ -85,6 +85,9 @@
   };
   function computeStationAnchors() { // back out tube-space anchors from the rest screen framing (aspect-robust)
     var focal = (W * 0.5) / Math.tan(FOV / 2), m = Math.min(W, H);
+    var small = m < 760; // phones / small tablets -> bigger fingertip controls
+    STA.dpad.ps = small ? 0.085 : 0.05; STA.bank.ph = small ? 0.175 : 0.135; STA.valve.pr = small ? 0.095 : 0.075;
+    STA.brief.pw = small ? 0.07 : 0.05; STA.brief.ph = small ? 0.085 : 0.06;
     for (var k in STA) { var S = STA[k]; var sx = S.fx * W, sy = S.fy * H, z = S.z;
       S.a = [(sx - W / 2) * z / focal, (H / 2 - sy) * z / focal, z]; S.restScale = focal / z;
       S.rw = (S.pw || 0) * W; S.rh = (S.ph || 0) * H; S.rr = (S.pr || 0) * m; S.rsz = (S.ps || 0) * m; }
@@ -233,7 +236,7 @@
     for (var y2 = 0; y2 < G.gh; y2++) for (var x2 = 0; x2 < G.gw; x2++) { var t = cell(x2, y2); if (t.mon) continue; var cnt = 0; for (var ny = -1; ny <= 1; ny++) for (var nx = -1; nx <= 1; nx++) { if (!nx && !ny) continue; var nb = cell(x2 + nx, y2 + ny); if (nb && nb.mon) cnt++; } t.n = cnt; }
     // reveal start (it is a 0 — flood its pocket)
     var startC = cell(sx, sy); seeCell(startC);
-    G.pings = effPings(); G.stalker = null; G.woke = false; G.confirmDir = null; G.transit = null; G.onLoot = false;
+    G.pings = effPings(); G.stalker = null; G.woke = false; G.confirmDir = null; G.transit = null; G.onLoot = false; clearDirs();
     G.depth = Lc.depth;
     G.snow = []; for (var sN = 0; sN < 120; sN++) G.snow.push(newSnow(true));
   }
@@ -365,6 +368,7 @@
     G.lamp.hull = 1; Audio.roar(); Audio.damage();
     G.glitch = 0.9; G.sanity = clamp(G.sanity - 0.12, 0, 1); // the strike tears the tube and the mind
     G.scare = { shape: def.shape, name: def.name, until: G.time + (def.tier >= 3 ? 1.6 : 1.1), t0: G.time, tier: def.tier };
+    clearDirs(); // consume held movement so the sub doesn't auto-step when the scare clears
     Audio.setMusic("threat");
   }
   function ping() {
@@ -403,6 +407,7 @@
     G.valveAngle += G.valveSpin * s; G.valveSpin += (0 - G.valveSpin) * Math.min(1, s * 4);
 
     if (G.transit) { G.transit.t += s / CFG.moveGlide; if (G.transit.t >= 1) resolveArrive(G.transit); }
+    else pumpHeldDrive();   // held WSAD/d-pad keeps driving cell-to-cell once the glide lands (steady 0.34s cadence)
 
     if (G.lock) { var lk = G.lock; lk.ang = (lk.ang + lk.spd * lk.dir * s) % (Math.PI * 2);
       G.oxygen -= CFG.idleDrain * s * 1.6; G.threat = clamp(G.threat + 4 * s, 0, 100); // broadcasting burns air + screams into the dark
@@ -528,17 +533,47 @@
     // murk swallowing the far end of the tube
     var fcp = proj(0, TUBE_Z[TUBE_Z.length - 1]); var hz = ctx.createRadialGradient(fcp[0], fcp[1], 2, fcp[0], fcp[1], H * 0.45);
     hz.addColorStop(0, "rgba(5,11,15,0.88)"); hz.addColorStop(1, "rgba(5,11,15,0)"); ctx.fillStyle = hz; ctx.fillRect(0, 0, W, H);
+    // ---- little riveted portholes set into the tube wall (parallax with the look camera) ----
+    var PORTS = [{ a: 0.55, z: 1.15 }, { a: 2.55, z: 1.55 }, { a: 0.30, z: 2.6 }, { a: 2.85, z: 2.9 }];
+    var ndp = nearestMonDist(), shapeOp = clamp((G.threat / 100) * 0.5 + (ndp <= 3 ? 0.4 : 0) + (1 - G.sanity) * 0.3, 0, 1);
+    for (var ppi = 0; ppi < PORTS.length; ppi++) {
+      var P = PORTS[ppi], pc = proj(P.a, P.z);
+      if (pc[2] > 5 || pc[2] < 0.4 || pc[0] < -120 || pc[0] > W + 120 || pc[1] < -120 || pc[1] > H + 120) continue;
+      var pr = clamp(focal / pc[2] * 0.16, 8, 80), fr = fog(pc[2]), lit = (G.lightOn ? 0.9 : 0.55) * fr, pcx = pc[0], pcy = pc[1];
+      var wg = ctx.createRadialGradient(pcx - pr * 0.3, pcy - pr * 0.3, pr * 0.1, pcx, pcy, pr);
+      wg.addColorStop(0, "rgba(10,40,48," + lit.toFixed(2) + ")"); wg.addColorStop(1, "rgba(2,10,14," + (lit * 0.6).toFixed(2) + ")");
+      ctx.fillStyle = wg; ctx.beginPath(); ctx.arc(pcx, pcy, pr, 0, 7); ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.arc(pcx, pcy, pr, 0, 7); ctx.clip();
+      ctx.strokeStyle = "rgba(120,200,205," + (0.10 * fr).toFixed(3) + ")"; ctx.lineWidth = 1;
+      for (var ca2 = 0; ca2 < 2; ca2++) { var cph = G.time * (0.4 + ca2 * 0.2) + ppi; ctx.beginPath(); ctx.arc(pcx + Math.cos(cph) * pr * 0.3, pcy + Math.sin(cph) * pr * 0.3, pr * (0.5 + ca2 * 0.25), 0, Math.PI * 1.3); ctx.stroke(); }
+      var phase = (G.time * 0.08 + ppi * 0.37) % 1, op = shapeOp * Math.max(0, Math.sin(phase * Math.PI)) * 0.7;
+      if (op > 0.04) { var sxp = pcx + (phase - 0.5) * pr * 3.2, syp = pcy + Math.sin(G.time * 0.6 + ppi) * pr * 0.3;
+        var sg2 = ctx.createRadialGradient(sxp, syp, 0, sxp, syp, pr * 0.9); sg2.addColorStop(0, "rgba(0,0,0," + op.toFixed(3) + ")"); sg2.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = sg2; ctx.beginPath(); ctx.ellipse(sxp, syp, pr * 0.9, pr * 0.45, 0.2, 0, 7); ctx.fill(); }
+      ctx.fillStyle = "rgba(180,210,215," + (0.18 * fr).toFixed(3) + ")"; for (var cs2 = 0; cs2 < 5; cs2++) { var ang2 = ppi * 1.7 + cs2 * 1.3, rr2 = pr * (0.3 + (cs2 % 3) * 0.22); ctx.fillRect(pcx + Math.cos(ang2) * rr2, pcy + Math.sin(ang2) * rr2, 1.4, 1.4); }
+      ctx.restore();
+      ctx.lineWidth = Math.max(3, pr * 0.22); ctx.strokeStyle = Art.mix("#0d1116", PAL.steelLo, 0.4 + lit * 0.4); ctx.beginPath(); ctx.arc(pcx, pcy, pr, 0, 7); ctx.stroke();
+      ctx.lineWidth = Math.max(1, pr * 0.06); ctx.strokeStyle = PAL.steelHi; ctx.beginPath(); ctx.arc(pcx, pcy, pr - pr * 0.10, -0.8, 0.7); ctx.stroke();
+      ctx.fillStyle = PAL.rivet; var nb2 = pr > 26 ? 8 : 6; for (var rb = 0; rb < nb2; rb++) { var rba = rb / nb2 * Math.PI * 2; ctx.beginPath(); ctx.arc(pcx + Math.cos(rba) * pr, pcy + Math.sin(rba) * pr, Math.max(1, pr * 0.07), 0, 7); ctx.fill(); }
+    }
   }
   // a creature swimming PAST the window glass — sneaky, lit at centre, lost in murk at the frame edges
+  // window contact is ONLY a dark silhouette lost in murk — never the creature mesh ("did I see something?")
   function drawPassby(pb, win) {
     if (!pb || win.w < 4) return; var u = pb.t / pb.dur;
     var rx = pb.side * 8 - pb.side * 16 * smooth(u), ry = pb.y + Math.sin(pb.t * 2.1) * 0.12, rz = pb.depth + Math.sin(pb.t * 1.3) * 0.4;
     if (rz < 0.6) return; var focal = win.w * 0.5 / Math.tan(1.2 / 2);
     var sx = win.x + win.w / 2 + (rx / rz) * focal, sy = win.y + win.h / 2 + (ry / rz) * focal, sz = Math.min(win.h * 0.95, (focal * 1.7) / rz);
-    var lit = (G.lightOn ? 0.5 : 0.22) * smooth(1 - Math.abs(u - 0.5) * 2);
+    var center = smooth(1 - Math.abs(u - 0.5) * 2), vis = (G.lightOn ? 0.42 : 0.26) * center * (0.55 + G.sanity * 0.45);
+    var big = pb.shape === "bloop", rw = sz * (big ? 0.95 : 0.6), rh = sz * (big ? 0.8 : 0.42);
     ctx.save(); ctx.beginPath(); Art.rrect(ctx, win.x, win.y, win.w, win.h, 10); ctx.clip();
-    if (pb.shape === "bloop") Art.drawBloop3D(ctx, sx, sy, sz * 0.85, { yaw: pb.side * 1.2 + Math.sin(G.time * 0.6) * 0.2, pitch: -0.05, mouth: 0.2 + 0.1 * Math.sin(G.time), t: G.time, lit: lit });
-    else Art.drawAngler3D(ctx, sx, sy, sz * 0.6, { yaw: pb.side * 1.3 + Math.sin(G.time * 0.8) * 0.25, pitch: -0.08, mouth: 0.16, t: G.time, lit: lit });
+    var sg = ctx.createRadialGradient(sx, sy, rw * 0.1, sx, sy, rw);
+    sg.addColorStop(0, "rgba(1,3,5," + (0.55 + vis * 0.4).toFixed(2) + ")"); sg.addColorStop(0.7, "rgba(2,5,8," + (0.35 + vis * 0.3).toFixed(2) + ")"); sg.addColorStop(1, "rgba(3,7,10,0)");
+    ctx.fillStyle = sg; ctx.beginPath(); ctx.ellipse(sx, sy, rw, rh, Math.sin(G.time * 0.5) * 0.12, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgba(1,3,5," + (0.3 + vis * 0.25).toFixed(2) + ")"; ctx.beginPath(); ctx.ellipse(sx - pb.side * rw * 0.55, sy + rh * 0.2, rw * (big ? 0.5 : 0.32), rh * 0.5, pb.side * (big ? 1.1 : 1.4), 0, 7); ctx.fill();
+    if (vis > 0.30) { ctx.strokeStyle = "rgba(40,72,74," + ((vis - 0.30) * 0.8).toFixed(2) + ")"; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.ellipse(sx, sy, rw * 0.82, rh * 0.82, 0, -1.1, 0.6); ctx.stroke(); }
+    var mg = ctx.createLinearGradient(win.x, win.y, win.x, win.y + win.h); mg.addColorStop(0, "rgba(4,9,12,0.30)"); mg.addColorStop(0.5, "rgba(4,9,12,0.10)"); mg.addColorStop(1, "rgba(4,9,12,0.34)");
+    ctx.fillStyle = mg; ctx.fillRect(win.x, win.y, win.w, win.h);
     ctx.restore();
   }
 
@@ -574,7 +609,8 @@
     if (G.scare) drawScare();
     else Art.drawLeak(ctx, W, H, clamp(G.leak, 0, 1), G.time);
     if (!G.scare) drawRadioPanel();   // the only dive text — diegetic comms, beneath the CRT grade
-    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, flash: G.flash, flashCol: G.flashCol, sanity: G.sanity, time: G.time, glitch: G.glitch });
+    var pxBase = 3 + (1 - G.sanity) * 3 + (G.scare ? 2 : 0); // chunkier as Sergey's mind frays
+    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, flash: G.flash, flashCol: G.flashCol, sanity: G.sanity, time: G.time, glitch: G.glitch, pixel: pxBase });
     if (G.heartbeat > 0.25) { ctx.fillStyle = "rgba(150,20,30," + (G.heartbeat * 0.16).toFixed(3) + ")"; ctx.fillRect(0, 0, W, H); }
   }
   // screen-fixed comms readout (drawn beneath the CRT grade so it reads as a tube)
@@ -602,17 +638,39 @@
   }
 
   function drawMonitor() {
-    var m = L.monitor;
-    // CRT housing
-    ctx.fillStyle = PAL.steelLo; Art.rrect(ctx, m.x - 6, m.y - 6, m.w + 12, m.h + 12, 10); ctx.fill();
+    var m = L.monitor, cx0 = m.x + m.w / 2, cy0 = m.y + m.h / 2;
+    // riveted steel sonar bezel + engraved labels
+    ctx.fillStyle = PAL.steelLo; Art.rrect(ctx, m.x - 8, m.y - 8, m.w + 16, m.h + 16, 12); ctx.fill();
+    ctx.strokeStyle = "#05080c"; ctx.lineWidth = 2; Art.rrect(ctx, m.x - 8, m.y - 8, m.w + 16, m.h + 16, 12); ctx.stroke();
     ctx.strokeStyle = PAL.steelHi; ctx.lineWidth = 1.5; Art.rrect(ctx, m.x - 6, m.y - 6, m.w + 12, m.h + 12, 10); ctx.stroke();
-    var fg = ctx.createRadialGradient(m.x + m.w / 2, m.y + m.h / 2, 4, m.x + m.w / 2, m.y + m.h / 2, m.w * 0.7);
-    fg.addColorStop(0, "#06241a"); fg.addColorStop(1, "#02110b"); ctx.fillStyle = fg; Art.rrect(ctx, m.x, m.y, m.w, m.h, 6); ctx.fill();
+    ctx.fillStyle = PAL.rivet; for (var rv = 0; rv < 16; rv++) { var ra = rv / 16 * Math.PI * 2; ctx.beginPath(); ctx.arc(cx0 + Math.cos(ra) * (m.w / 2 + 7), cy0 + Math.sin(ra) * (m.h / 2 + 7), 1.8, 0, 7); ctx.fill(); }
+    Art.text(ctx, "СОНАР / SONAR", cx0, m.y - 11, Math.max(8, m.h * 0.05), PAL.amber, "center");
+    Art.text(ctx, "ПР-7", m.x - 2, m.y + m.h + 16, Math.max(7, m.h * 0.042), PAL.textDim, "left");
+    Art.text(ctx, "−5200М", m.x + m.w + 2, m.y + m.h + 16, Math.max(7, m.h * 0.042), PAL.textDim, "right");
+    // phosphor scope face
+    var fg = ctx.createRadialGradient(cx0, cy0, 4, cx0, cy0, m.w * 0.7);
+    fg.addColorStop(0, "#06241a"); fg.addColorStop(0.7, "#03160e"); fg.addColorStop(1, "#02100a"); ctx.fillStyle = fg; Art.rrect(ctx, m.x, m.y, m.w, m.h, 6); ctx.fill();
     // grid geometry
     var gap = 2, cellSz = Math.floor(Math.min((m.w - 12 - (G.gw - 1) * gap) / G.gw, (m.h - 12 - (G.gh - 1) * gap) / G.gh));
     cellSz = clamp(cellSz, 6, 56);
     var fullW = G.gw * cellSz + (G.gw - 1) * gap, fullH = G.gh * cellSz + (G.gh - 1) * gap;
     var gx = m.x + (m.w - fullW) / 2, gy = m.y + (m.h - fullH) / 2;
+    // ---- sonar scope under the cells: range rings, bearing scale, sweep (reuses G.sweep) ----
+    (function sonarScope() {
+      var R = Math.min(m.w, m.h) * 0.46, sccx = cx0, sccy = cy0;
+      ctx.save(); ctx.beginPath(); Art.rrect(ctx, m.x, m.y, m.w, m.h, 6); ctx.clip();
+      ctx.lineWidth = 1;
+      for (var rg = 1; rg <= 4; rg++) { var rr = R * rg / 4; ctx.strokeStyle = "rgba(40,150,110," + (0.20 - rg * 0.02).toFixed(3) + ")"; ctx.beginPath(); ctx.arc(sccx, sccy, rr, 0, 7); ctx.stroke();
+        ctx.fillStyle = "rgba(70,210,150,0.32)"; ctx.font = Math.max(7, R * 0.05) + "px 'Courier New', monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText((rg * 0.5).toFixed(1), sccx + 2, sccy - rr + R * 0.05); }
+      ctx.strokeStyle = "rgba(40,150,110,0.16)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sccx - R, sccy); ctx.lineTo(sccx + R, sccy); ctx.moveTo(sccx, sccy - R); ctx.lineTo(sccx, sccy + R); ctx.stroke();
+      for (var bt = 0; bt < 36; bt++) { var ba = bt * 10 * Math.PI / 180 - Math.PI / 2, maj = (bt % 3) === 0, tl = maj ? R * 0.10 : R * 0.05;
+        ctx.strokeStyle = "rgba(60,190,135," + (maj ? 0.45 : 0.22) + ")"; ctx.lineWidth = maj ? 1.3 : 1; ctx.beginPath(); ctx.moveTo(sccx + Math.cos(ba) * R, sccy + Math.sin(ba) * R); ctx.lineTo(sccx + Math.cos(ba) * (R - tl), sccy + Math.sin(ba) * (R - tl)); ctx.stroke(); }
+      var sw = G.sweep || 0;
+      ctx.save(); ctx.beginPath(); ctx.moveTo(sccx, sccy); ctx.arc(sccx, sccy, R, sw - 1.4, sw); ctx.closePath();
+      var wg = ctx.createRadialGradient(sccx, sccy, 0, sccx, sccy, R); wg.addColorStop(0, "rgba(80,255,180,0.10)"); wg.addColorStop(1, "rgba(80,255,180,0)"); ctx.fillStyle = wg; ctx.fill(); ctx.restore();
+      ctx.strokeStyle = "rgba(140,255,205,0.5)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sccx, sccy); ctx.lineTo(sccx + Math.cos(sw) * R, sccy + Math.sin(sw) * R); ctx.stroke();
+      ctx.restore(); ctx.textBaseline = "alphabetic";
+    })();
     // prep cells for drawCell
     for (var i = 0; i < G.cells.length; i++) { var c = G.cells[i]; c.revealed = c.seen; c.dnum = c.n; c.cor = false; c.loot = (c.seen && c.lootId && !c.collected && c.kind !== "source") ? c.kind : null; }
     Art.drawGrid(ctx, { cells: G.cells, gw: G.gw, gh: G.gh, cell: cellSz, gap: gap, x: gx, y: gy, time: G.time, cursor: null });
@@ -676,16 +734,49 @@
     ctx.restore();
   }
 
-  function drawScare() { // full-screen takeover: the Angler rushes the glass and fills your view
-    var sc = G.scare, dur = Math.max(0.3, sc.until - sc.t0), k = clamp((G.time - sc.t0) / dur, 0, 1), lung = k * k;
-    ctx.fillStyle = "#04080c"; ctx.fillRect(0, 0, W, H);
-    var bloop = sc.shape === "bloop";
-    var sz = Math.max(W, H) * ((bloop ? 0.46 : 0.34) + lung * (bloop ? 1.25 : 0.95));
-    var jx = (Math.random() - 0.5) * (bloop ? 30 : 22) * (1 - k * 0.3), jy = (Math.random() - 0.5) * (bloop ? 30 : 22) * (1 - k * 0.3);
-    if (bloop) Art.drawBloop3D(ctx, W / 2 + jx, H * 0.47 + jy, sz, { yaw: Math.sin(G.time * 18) * 0.12, pitch: -0.02, mouth: clamp(0.35 + lung * 1.0, 0, 1), t: G.time, lit: 1 });
-    else Art.drawAngler3D(ctx, W / 2 + jx, H * 0.47 + jy, sz, { yaw: Math.sin(G.time * 26) * 0.14, pitch: -0.03, mouth: clamp(0.3 + lung * 1.05, 0, 1), t: G.time, lit: 1, boss: sc.tier >= 3 });
-    if (k < 0.18) { ctx.fillStyle = "rgba(240,245,245," + (0.7 * (1 - k / 0.18)).toFixed(2) + ")"; ctx.fillRect(0, 0, W, H); }
-    ctx.fillStyle = "rgba(150,18,22," + (0.3 * (1 - k)).toFixed(2) + ")"; ctx.fillRect(0, 0, W, H);
+  // the strike NEVER shows the creature — pure suggestion: cut, shake, the glass cracking,
+  // a 1-2 frame shadow that eclipses the light, the headlight guttering, blood-dark water.
+  function drawScare() {
+    var sc = G.scare, dur = Math.max(0.3, sc.until - sc.t0), k = clamp((G.time - sc.t0) / dur, 0, 1);
+    var seed = (sc.t0 * 1000) | 0;
+    function nz(i) { var s = (seed ^ (i * 2654435761)) >>> 0; s = Math.imul(s ^ (s >>> 15), 1 | s); s = (s + Math.imul(s ^ (s >>> 7), 61 | s)) ^ s; return ((s ^ (s >>> 14)) >>> 0) / 4294967296; }
+    // (1) hard cut to black + a guttering headlight (mostly dark, brief strobes)
+    ctx.fillStyle = "#010305"; ctx.fillRect(0, 0, W, H);
+    if (k < 0.70 && Math.sin(G.time * 47) * Math.sin(G.time * 13) > 0.55) { var gg = ctx.createRadialGradient(W / 2, H * 0.55, 0, W / 2, H * 0.55, Math.max(W, H) * 0.6);
+      gg.addColorStop(0, "rgba(60,52,30,0.55)"); gg.addColorStop(1, "rgba(0,0,0,0)"); ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H); }
+    // (2) violent shake on everything below, decaying after k>0.55
+    var shk = (1 - clamp(k / 0.55, 0, 1)) * 26, jx = (Math.random() - 0.5) * shk, jy = (Math.random() - 0.5) * shk;
+    ctx.save(); ctx.translate(jx, jy);
+    // (3) the glass CRACKS — white fractures spider from a fixed impact point, grow with k
+    if (k > 0.06) {
+      var grow = clamp((k - 0.06) / 0.24, 0, 1), ix = W * (0.32 + nz(0) * 0.36), iy = H * (0.30 + nz(1) * 0.34);
+      ctx.save(); ctx.globalAlpha = clamp(1 - (k - 0.45) / 0.45, 0, 1); ctx.strokeStyle = "rgba(225,238,242,0.85)"; ctx.lineJoin = "round";
+      for (var a = 0; a < 7; a++) { var ang = a / 7 * Math.PI * 2 + nz(a + 5) * 0.8, len = (Math.max(W, H) * (0.18 + nz(a + 9) * 0.34)) * grow;
+        ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(ix, iy);
+        for (var sgi = 1; sgi <= 4; sgi++) { var f = sgi / 4; ctx.lineTo(ix + Math.cos(ang + (nz(a * 9 + sgi) - 0.5) * 0.7) * len * f, iy + Math.sin(ang + (nz(a * 9 + sgi + 1) - 0.5) * 0.7) * len * f); }
+        ctx.stroke(); }
+      ctx.fillStyle = "rgba(235,245,248," + (0.6 * grow).toFixed(2) + ")"; ctx.beginPath(); ctx.arc(ix, iy, 3 + grow * 5, 0, 7); ctx.fill(); ctx.restore();
+    }
+    // (4) SUBLIMINAL SHADOW — a mass eclipses the light for 1-2 frames only (never a creature mesh)
+    if (k > 0.12 && k < 0.50 && Math.sin(G.time * 90) > 0.86) {
+      var ex = W * (0.40 + nz(2) * 0.20), ey = H * (0.44 + nz(3) * 0.16), er = Math.max(W, H) * (0.55 + nz(4) * 0.25);
+      var sg = ctx.createRadialGradient(ex, ey, er * 0.15, ex, ey, er); sg.addColorStop(0, "rgba(0,0,0,0.98)"); sg.addColorStop(0.82, "rgba(2,5,8,0.92)"); sg.addColorStop(1, "rgba(2,5,8,0)");
+      ctx.fillStyle = sg; ctx.beginPath(); ctx.ellipse(ex, ey, er, er * 0.78, nz(6) * 0.4 - 0.2, 0, 7); ctx.fill();
+      ctx.strokeStyle = "rgba(40,70,72,0.5)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(ex, ey, er * 0.7, er * 0.55, nz(6) * 0.4 - 0.2, -0.6, 1.4); ctx.stroke();
+    }
+    ctx.restore(); // end shake
+    // (5) blood-dark water floods up from the bottom and fills the frame
+    if (k > 0.28) { var fk = clamp((k - 0.28) / 0.72, 0, 1), fy = H - H * (0.20 + fk * 1.05);
+      var fg = ctx.createLinearGradient(0, fy, 0, H); fg.addColorStop(0, "rgba(40,6,8," + (0.35 + fk * 0.4).toFixed(2) + ")"); fg.addColorStop(1, "rgba(8,2,3," + (0.7 + fk * 0.3).toFixed(2) + ")");
+      ctx.fillStyle = fg; ctx.beginPath(); ctx.moveTo(0, fy); for (var x2 = 0; x2 <= W; x2 += W / 14) ctx.lineTo(x2, fy + Math.sin(x2 * 0.02 + G.time * 3) * (6 + fk * 6)); ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill(); }
+    // (6) opening white-hot retina bloom (first ~2 frames)
+    if (k < 0.06) { ctx.fillStyle = "rgba(240,245,248," + (0.85 * (1 - k / 0.06)).toFixed(2) + ")"; ctx.fillRect(0, 0, W, H); }
+    // (7) red alarm vignette pulse, and (8) settle to near-black at the tail
+    var ap = 0.5 + 0.5 * Math.sin(G.time * 11);
+    var vg2 = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.max(W, H) * 0.72);
+    vg2.addColorStop(0, "rgba(0,0,0,0)"); vg2.addColorStop(1, "rgba(140,16,22," + (0.22 + ap * 0.16 * (1 - k * 0.3)).toFixed(3) + ")");
+    ctx.fillStyle = vg2; ctx.fillRect(0, 0, W, H);
+    if (k > 0.7) { ctx.fillStyle = "rgba(1,3,5," + (((k - 0.7) / 0.3) * 0.7).toFixed(2) + ")"; ctx.fillRect(0, 0, W, H); }
   }
 
   // ---------------- title / help / options / end ----------------
@@ -697,7 +788,7 @@
     UI.menu = []; var bw = clamp(W * 0.4, 220, 340), bh = clamp(H * 0.075, 44, 62), bx = (W - bw) / 2, by = H * 0.52, gap = 14;
     var labels = [[S.menu_dive, "dive", true], [S.menu_help, "help", false], [S.menu_options, "options", false]];
     for (var i = 0; i < labels.length; i++) { var r = { x: bx, y: by + i * (bh + gap), w: bw, h: bh }; Art.button(ctx, r, labels[i][0], { primary: labels[i][2], hover: UI.hover === "m" + i || (G.padActive && G.menuSel === i) }); UI.menu.push({ r: r, act: labels[i][1] }); }
-    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, time: G.time, glitch: (G.time < 1.4 ? 0.6 : 0) }); // power-on tearing
+    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, time: G.time, glitch: (G.time < 1.4 ? 0.6 : 0), pixel: 3 }); // power-on tearing
   }
   function renderHelp() {
     renderSceneBackground(); var x = clamp(W * 0.08, 18, 180), y = clamp(H * 0.07, 30, 90), w = W - x * 2;
@@ -723,12 +814,20 @@
     Art.text(ctx, fmt(S.end_depth, { d: Math.floor(G.depth) }), W / 2, y + clamp(W * 0.05, 34, 56) + 104, 14, PAL.amber, "center");
     UI.contBtn = { x: W / 2 - 120, y: H - clamp(H * 0.16, 84, 140), w: 240, h: 52 }; Art.button(ctx, UI.contBtn, S.again, { primary: true, hover: UI.hover === "cont" });
     drawRadioPanel(); // Sergey's last words land on the comms readout
-    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, time: G.time, glitch: win ? 0 : 0.3 });
+    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, time: G.time, glitch: win ? 0 : 0.3, pixel: 3.5 });
   }
 
   // ---------------- input ----------------
   var UI = { overlay: null, hover: null, menu: [], optHit: [] };
   var holdTimer = null, holdFired = false, holdCell = null;
+  // ---- continuous drive: held WSAD / arrows / d-pad re-pump cell-to-cell at the transit cadence ----
+  var heldDirs = [], padHeld = null;
+  var DIR_OF = { KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1], KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
+  function pushDir(dx, dy) { for (var i = heldDirs.length - 1; i >= 0; i--) if (heldDirs[i].dx === dx && heldDirs[i].dy === dy) heldDirs.splice(i, 1); heldDirs.push({ dx: dx, dy: dy }); }
+  function popDir(dx, dy) { for (var i = heldDirs.length - 1; i >= 0; i--) if (heldDirs[i].dx === dx && heldDirs[i].dy === dy) heldDirs.splice(i, 1); }
+  function clearDirs() { heldDirs.length = 0; padHeld = null; }
+  function pumpHeldDrive() { if (!heldDirs.length || G.scene !== "dive" || G.transit || G.scare || G.lock) return; var d = heldDirs[heldDirs.length - 1]; tryDrive(d.dx, d.dy); }
+  function dpadDirAt(p) { var d = dpadRects(); if (inside(d.up, p)) return [0, -1]; if (inside(d.down, p)) return [0, 1]; if (inside(d.left, p)) return [-1, 0]; if (inside(d.right, p)) return [1, 0]; return null; }
   function pt(e) { var rect = canvas.getBoundingClientRect(); var s = e.touches && e.touches[0] ? e.touches[0] : (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e; return { x: s.clientX - rect.left, y: s.clientY - rect.top }; }
   function gridCellAt(p) { if (!L._grid) return null; var g = L._grid; var cx = Math.floor((p.x - g.gx) / (g.cell + g.gap)), cy = Math.floor((p.y - g.gy) / (g.cell + g.gap)); if (cx < 0 || cy < 0 || cx >= G.gw || cy >= G.gh) return null; return { x: cx, y: cy }; }
 
@@ -748,9 +847,8 @@
     if (inside(L.btn.patch, p)) { patch(); return; }
     if (inside(L.btn.crank, p)) { crank(); return; }
     if (inside(L.btn.brief, p)) { UI.overlay = "help"; return; }
-    var d = dpadRects();
-    if (inside(d.up, p)) { tryDrive(0, -1); return; } if (inside(d.down, p)) { tryDrive(0, 1); return; }
-    if (inside(d.left, p)) { tryDrive(-1, 0); return; } if (inside(d.right, p)) { tryDrive(1, 0); return; }
+    var pd = dpadDirAt(p);
+    if (pd) { padHeld = pd; pushDir(pd[0], pd[1]); if (!G.transit && !G.scare && !G.lock) tryDrive(pd[0], pd[1]); return; } // press-and-hold = continuous drive
     // tap a grid cell: adjacent -> drive into it; (hold handled separately -> flag)
     var gc = gridCellAt(p);
     if (gc) { var ddx = gc.x - G.sub.cx, ddy = gc.y - G.sub.cy; if (Math.abs(ddx) + Math.abs(ddy) === 1) tryDrive(ddx, ddy); }
@@ -778,8 +876,8 @@
   canvas.addEventListener("mousemove", function (e) { var p = pt(e);
     if (drag.down && drag.look) { var dx = p.x - drag.lx, dy = p.y - drag.ly; drag.lx = p.x; drag.ly = p.y; drag.moved += Math.abs(dx) + Math.abs(dy); if (drag.moved > 8) applyLook(dx, dy); }
     else onHover(p); });
-  canvas.addEventListener("mouseup", function () { drag.down = false; drag.look = false; });
-  canvas.addEventListener("mouseleave", function () { drag.down = false; drag.look = false; });
+  canvas.addEventListener("mouseup", function () { drag.down = false; drag.look = false; if (padHeld) { popDir(padHeld[0], padHeld[1]); padHeld = null; } });
+  canvas.addEventListener("mouseleave", function () { drag.down = false; drag.look = false; if (padHeld) { popDir(padHeld[0], padHeld[1]); padHeld = null; } });
   canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); if (G && G.scene === "dive" && !UI.overlay) { var gc = gridCellAt(pt(e)); if (gc) flagCell(cell(gc.x, gc.y)); } });
 
   canvas.addEventListener("touchstart", function (e) { e.preventDefault(); var p = pt(e); holdFired = false;
@@ -790,14 +888,17 @@
     else { onDown(p); drag.acted = true; }        // a control -> act immediately
   }, { passive: false });
   canvas.addEventListener("touchmove", function (e) { e.preventDefault(); var p = pt(e);
+    if (padHeld && !dpadDirAt(p)) { popDir(padHeld[0], padHeld[1]); padHeld = null; } // finger slid off the d-pad -> stop
     if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
     if (drag.down && drag.look) { var dx = p.x - drag.lx, dy = p.y - drag.ly; drag.lx = p.x; drag.ly = p.y; drag.moved += Math.abs(dx) + Math.abs(dy); if (drag.moved > 12) applyLook(dx, dy); }
   }, { passive: false });
   canvas.addEventListener("touchend", function (e) { e.preventDefault(); if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
-    var wasLook = drag.look && drag.moved > 12, hc = holdCell, acted = drag.acted; drag.down = false; drag.look = false; drag.acted = false; holdCell = null;
+    var wasLook = drag.look && drag.moved > 12, acted = drag.acted; drag.down = false; drag.look = false; drag.acted = false; holdCell = null;
+    if (padHeld) { popDir(padHeld[0], padHeld[1]); padHeld = null; } // release held d-pad drive
     if (holdFired || wasLook || acted) return;   // flagged / looked / control already acted
     onDown(pt(e));                                // grid-cell tap drives; empty tap is a harmless no-op
   }, { passive: false });
+  canvas.addEventListener("touchcancel", function () { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } clearDirs(); drag.down = false; drag.look = false; drag.acted = false; holdCell = null; }, { passive: false });
 
   window.addEventListener("keydown", function (e) {
     var code = e.code; if (!G) return;
@@ -805,10 +906,7 @@
     if (code === "KeyH") { UI.overlay = "help"; e.preventDefault(); return; }
     if (G.scene === "dive") {
       if (G.lock) { if (code === "Space" || code === "Enter") { lockAttempt(); e.preventDefault(); } else if (code === "Escape") { lockFail(); e.preventDefault(); } return; }
-      if (code === "KeyW" || code === "ArrowUp") { tryDrive(0, -1); e.preventDefault(); }
-      else if (code === "KeyS" || code === "ArrowDown") { tryDrive(0, 1); e.preventDefault(); }
-      else if (code === "KeyA" || code === "ArrowLeft") { tryDrive(-1, 0); e.preventDefault(); }
-      else if (code === "KeyD" || code === "ArrowRight") { tryDrive(1, 0); e.preventDefault(); }
+      if (DIR_OF[code]) { if (!e.repeat) { var dd = DIR_OF[code]; pushDir(dd[0], dd[1]); G.idleT = 0; if (!G.transit && !G.scare && !G.lock) tryDrive(dd[0], dd[1]); } e.preventDefault(); }
       else if (code === "Space") { ping(); e.preventDefault(); }
       else if (code === "KeyF") { flagFaced(); e.preventDefault(); }
       else if (code === "KeyL") { toggleLight(); e.preventDefault(); }
@@ -820,6 +918,7 @@
     else if (G.scene === "end") { if (code === "Enter" || code === "Space") { startRun(); e.preventDefault(); } }
     else { if (code === "Enter" || code === "Space") { startRun(); e.preventDefault(); } } // title -> dive (no rig)
   });
+  window.addEventListener("keyup", function (e) { var d = DIR_OF[e.code]; if (d) { popDir(d[0], d[1]); e.preventDefault(); } });
 
   var padPrev = {};
   function pollPad() {

@@ -17,8 +17,9 @@
     bone:"#cdc6b2", boneHi:"#efe9d6",
     violet:"#8a6bd6", violetHi:"#c3aeff",
     text:"#cfe6df", textDim:"#6f8a84",
-    // aged-phosphor grade targets (additive; do not change the load-bearing greens)
-    agedWash:"rgba(40,46,30,0.10)", agedTint:"rgba(150,255,170,0.05)", amberBurn:"rgba(224,163,46,0.05)",
+    // aged-phosphor grade targets — darker, cooler, more desaturating (dread)
+    agedWash:"rgba(10,16,20,0.28)", agedTint:"rgba(120,200,170,0.035)", amberBurn:"rgba(180,120,30,0.04)",
+    deadGrade:"rgba(4,7,11,0.34)",  // cold near-black multiply that sinks the whole frame toward black
   };
 
   function hash(str) { var h = 2166136261; str = String(str);
@@ -35,6 +36,8 @@
 
   // ---------- baked layers (rebuilt on size change) ----------
   var cache = { w:0, h:0, grain:null, grains:null, scan:null, band:null, bandH:0, curve:null };
+  // separate pixelation buffer (device-pixel sized; independent of the porthole cache)
+  var px = { canvas:null, ctx:null, dw:0, dh:0, step:0 };
   function makeCanvas(w,h){ var c=document.createElement("canvas"); c.width=w; c.height=h; return c; }
 
   function rebake(w, h) {
@@ -434,19 +437,34 @@
     text(ctx, label, r.x+r.w/2, r.y+r.h/2+Math.round(r.h*0.18), Math.min(18, Math.round(r.h*0.42)), opts.disabled?PAL.textDim:(opts.primary?PAL.amberHi:PAL.text), "center");
   }
 
-  // full aged-CRT composite. opts: {scanlines, flash, flashCol, sanity, time, glitch, grade}
+  // full aged-CRT composite. opts: {scanlines, flash, flashCol, sanity, time, glitch, grade, pixel}
   function overlay(ctx, w, h, opts) {
     opts = opts||{}; var t = opts.time||0, cv = ctx.canvas;
-    // (0) aged-phosphor grade — desaturate/age the whole frame (greens still resolve)
+    // (0) aged-phosphor grade — darker + more desaturating (dread)
     if (opts.grade !== false) {
       ctx.fillStyle = PAL.agedWash; ctx.fillRect(0,0,w,h);
       ctx.save(); ctx.globalCompositeOperation = "screen"; ctx.fillStyle = PAL.agedTint; ctx.fillRect(0,0,w,h);
-      ctx.globalCompositeOperation = "overlay"; ctx.globalAlpha = 0.5; ctx.fillStyle = PAL.amberBurn; ctx.fillRect(0,0,w,h); ctx.restore();
+      ctx.globalCompositeOperation = "overlay"; ctx.globalAlpha = 0.5; ctx.fillStyle = PAL.amberBurn; ctx.fillRect(0,0,w,h);
+      ctx.globalCompositeOperation = "multiply"; ctx.globalAlpha = 1; ctx.fillStyle = PAL.deadGrade; ctx.fillRect(0,0,w,h); ctx.restore();
+    }
+    // (0.5) FULL-SCREEN PIXELATION — downscale the composited frame, blit back chunky.
+    if (opts.pixel && opts.pixel > 1.05) {
+      var step = Math.max(1, Math.round(opts.pixel)), dw = cv.width, dh = cv.height;
+      var pw = Math.max(1, Math.ceil(dw / step)), ph2 = Math.max(1, Math.ceil(dh / step));
+      if (!px.canvas || px.dw !== dw || px.dh !== dh || px.step !== step) {
+        if (!px.canvas) { px.canvas = makeCanvas(pw, ph2); px.ctx = px.canvas.getContext("2d"); }
+        else { px.canvas.width = pw; px.canvas.height = ph2; }
+        px.dw = dw; px.dh = dh; px.step = step;
+      }
+      var pctx = px.ctx; pctx.imageSmoothingEnabled = false; pctx.setTransform(1,0,0,1,0,0);
+      pctx.clearRect(0,0,pw,ph2); pctx.drawImage(cv, 0,0,dw,dh, 0,0,pw,ph2);          // DOWN
+      ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.imageSmoothingEnabled = false; ctx.globalCompositeOperation = "copy";
+      ctx.drawImage(px.canvas, 0,0,pw,ph2, 0,0,pw*step,ph2*step); ctx.restore();        // UP (chunky)
     }
     // (a) baked curvature + corner vignette (bowed tube), then a soft center vignette
     if (cache.curve) ctx.drawImage(cache.curve, 0, 0, w, h);
     var vg = ctx.createRadialGradient(w/2,h/2, Math.min(w,h)*0.40, w/2,h/2, Math.max(w,h)*0.74);
-    vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(0,0,0,0.45)"); ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
+    vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(0,0,0,0.55)"); ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
     // (b) dense scanlines
     if (opts.scanlines!==false && cache.scan) ctx.drawImage(cache.scan, 0, 0, w, h);
     // (c) rolling refresh band (a slow bright bar drifting down the tube)
@@ -713,6 +731,16 @@
     // valve cap on top
     ctx.fillStyle = PAL.steelHi; rrect(ctx, x + w * 0.3, y - h * 0.06, w * 0.4, h * 0.06, 2); ctx.fill();
     ctx.fillStyle = PAL.rivet; ctx.fillRect(x + w * 0.44, y - h * 0.11, w * 0.12, h * 0.06);
+    // engraved nameplate + a bourdon mini pressure dial on the cap (corroborates the liquid column)
+    text(ctx, "КИСЛОРОД", x + w * 0.5, y + h * 0.05, Math.max(6, w * 0.17), PAL.amber, "center");
+    var dcx = x + w * 0.5, dcy = y - h * 0.10, dr = w * 0.16;
+    ctx.fillStyle = "#0b0e12"; ctx.beginPath(); ctx.arc(dcx, dcy, dr, 0, 7); ctx.fill();
+    ctx.strokeStyle = PAL.steelHi; ctx.lineWidth = 1; ctx.stroke();
+    var da0 = Math.PI * 0.78, da1 = Math.PI * 2.22;
+    for (var dk = 0; dk <= 6; dk++) { var dka = da0 + (da1 - da0) * dk / 6; ctx.strokeStyle = dk >= 5 ? PAL.blood : "rgba(170,190,190,0.6)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(dcx + Math.cos(dka) * dr * 0.7, dcy + Math.sin(dka) * dr * 0.7); ctx.lineTo(dcx + Math.cos(dka) * dr * 0.92, dcy + Math.sin(dka) * dr * 0.92); ctx.stroke(); }
+    var dna = da0 + (da1 - da0) * frac;
+    ctx.strokeStyle = frac < 0.28 ? PAL.bloodHi : PAL.amberHi; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(dcx, dcy); ctx.lineTo(dcx + Math.cos(dna) * dr * 0.78, dcy + Math.sin(dna) * dr * 0.78); ctx.stroke();
+    ctx.fillStyle = PAL.amber; ctx.beginPath(); ctx.arc(dcx, dcy, dr * 0.12, 0, 7); ctx.fill();
     // glass sight-gauge down the middle
     var gx = x + w * 0.34, gw = w * 0.32, gy = y + h * 0.10, gh = h * 0.82;
     ctx.fillStyle = "#03070b"; rrect(ctx, gx, gy, gw, gh, gw * 0.3); ctx.fill();
@@ -737,21 +765,32 @@
     if (low) { var p = 0.5 + 0.5 * Math.sin(t * 6); ctx.save(); ctx.globalAlpha = p * 0.5; glowDot(ctx, x + w / 2, y + h * 0.5, w * 0.7, frac < 0.14 ? PAL.bloodHi : PAL.amberHi, 1); ctx.restore(); }
   }
 
-  // mechanical depth gauge — a needle dial
+  // authentic riveted depth manometer — ГЛУБИНА, layer numerals, danger band, counterweighted needle
   function drawDepthGauge(ctx, cx, cy, r, frac, t) {
-    frac = Math.max(0, Math.min(1, frac));
-    ctx.beginPath(); ctx.arc(cx, cy, r + 4, 0, 7); ctx.fillStyle = PAL.steelLo; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = PAL.steel; ctx.stroke();
+    frac = Math.max(0, Math.min(1, frac)); t = t || 0;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 5, 0, 7); ctx.fillStyle = PAL.steelLo; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = PAL.steel; ctx.stroke();
+    ctx.fillStyle = PAL.rivet; for (var bi = 0; bi < 6; bi++) { var ba = bi / 6 * Math.PI * 2; ctx.beginPath(); ctx.arc(cx + Math.cos(ba) * (r + 5), cy + Math.sin(ba) * (r + 5), Math.max(1.1, r * 0.07), 0, 7); ctx.fill(); }
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fillStyle = "#0b0e12"; ctx.fill();
-    // ticks across a 270° arc
-    var a0 = Math.PI * 0.75, a1 = Math.PI * 2.25;
-    for (var i = 0; i <= 10; i++) { var a = a0 + (a1 - a0) * i / 10; var deep = i >= 8;
-      ctx.strokeStyle = deep ? PAL.blood : "rgba(170,190,190,0.7)"; ctx.lineWidth = deep ? 2 : 1;
-      ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * (r - 5), cy + Math.sin(a) * (r - 5)); ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.stroke(); }
-    // needle
-    var na = a0 + (a1 - a0) * frac;
-    ctx.strokeStyle = PAL.amberHi; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(na) * (r - 6), cy + Math.sin(na) * (r - 6)); ctx.stroke();
+    var a0 = Math.PI * 0.75, a1 = Math.PI * 2.25, span = a1 - a0;
+    ctx.strokeStyle = "rgba(150,30,30,0.5)"; ctx.lineWidth = Math.max(2, r * 0.10);
+    ctx.beginPath(); ctx.arc(cx, cy, r - r * 0.08, a0 + span * (4 / 6), a1); ctx.stroke();
+    for (var i = 0; i <= 12; i++) { var a = a0 + span * i / 12, maj = (i % 2) === 0, deep = i >= 8;
+      ctx.strokeStyle = deep ? PAL.blood : "rgba(170,190,190,0.7)"; ctx.lineWidth = maj ? 2 : 1;
+      ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * (r - (maj ? 7 : 4)), cy + Math.sin(a) * (r - (maj ? 7 : 4))); ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.stroke();
+      if (maj) { var num = i / 2; ctx.fillStyle = num >= 5 ? PAL.bloodHi : "rgba(180,200,200,0.75)"; ctx.font = "bold " + Math.max(6, r * 0.22) + "px 'Courier New', monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(num + "", cx + Math.cos(a) * (r - r * 0.30), cy + Math.sin(a) * (r - r * 0.30)); } }
+    ctx.textBaseline = "alphabetic";
+    text(ctx, "ГЛУБИНА", cx, cy - r * 0.30, Math.max(6, r * 0.19), PAL.amber, "center");
+    text(ctx, Math.round(frac * 5200) + "", cx, cy + r * 0.46, Math.max(6, r * 0.22), PAL.phosHi, "center");
+    text(ctx, "М", cx, cy + r * 0.66, Math.max(5, r * 0.16), PAL.textDim, "center");
+    var na = a0 + span * frac;
+    ctx.strokeStyle = PAL.amberHi; ctx.lineWidth = 2; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(cx - Math.cos(na) * r * 0.22, cy - Math.sin(na) * r * 0.22); ctx.lineTo(cx + Math.cos(na) * (r - 8), cy + Math.sin(na) * (r - 8)); ctx.stroke();
+    ctx.lineCap = "butt";
     ctx.fillStyle = PAL.amber; ctx.beginPath(); ctx.arc(cx, cy, r * 0.12, 0, 7); ctx.fill();
-    ctx.strokeStyle = "rgba(120,255,210,0.06)"; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
+    ctx.fillStyle = PAL.steelHi; ctx.beginPath(); ctx.arc(cx, cy, r * 0.05, 0, 7); ctx.fill();
+    var gl = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r); gl.addColorStop(0, "rgba(180,220,230,0.10)"); gl.addColorStop(0.5, "rgba(0,0,0,0)"); ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill();
+    ctx.strokeStyle = "rgba(120,255,210,0.06)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
   }
 
   // a blinking warning lamp
