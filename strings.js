@@ -31,7 +31,7 @@
       "No gauges read numbers. Watch the AIR cylinder fall and the WATER rise as the hull is struck. You sit inside a steel TUBE — LOOK AROUND (drag the hull) to read the instruments, the depth dial, and the VALVE WHEEL you CRANK to descend. Things swim past the window.",
       "The RADIO is your only company. Command up top; static, the dead crew, and the Source itself below. The deeper you go, the less it can be trusted. Six layers down it is waiting. Reach it — if the math holds and your mind does too.",
     ],
-    help_controls: "DRIVE: W A S D / arrows.  PING: Space.  FLAG: F.  LIGHT: L.  SECURE: E.  CRANK: C.  PATCH: P.  LOOK AROUND THE CABIN: drag the hull / right stick.  Touch: tap a control, tap a cell to drive, hold to flag, drag the hull to look.  Gamepad supported.",
+    help_controls: "DRIVE: W A S D / arrows.  PING: Space.  FLAG: F.  FLASH (a quick glimpse): L.  SECURE: E.  CRANK: C.  PATCH: P.  LOOK AROUND THE CABIN: drag the hull / right stick.  Touch: tap a control, tap a cell to drive, hold to flag, drag the hull to look.  Gamepad supported.",
 
     options_title: "SYSTEMS",
     opt_sound: "SOUND",

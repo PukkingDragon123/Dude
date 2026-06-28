@@ -209,11 +209,16 @@
     ctx.save(); for (var i = 0; i < 70; i++) { var sd = i * 0.173, by = H - ((G.time * 600 + i * 97) % (H * 1.4)), bx = W * ((sd * 7) % 1), sz = 1 + (i % 3); ctx.fillStyle = "rgba(190,220,225," + (0.10 + 0.3 * Math.sin(k * Math.PI)).toFixed(2) + ")"; ctx.fillRect(bx, by, sz, sz * 2.4); } ctx.restore();
     ctx.globalAlpha = Math.sin(k * Math.PI); Art.text(ctx, "↓ " + Math.floor(G.depth) + " М ↓", W / 2, H * 0.5, clamp(W * 0.04, 18, 40), PAL.bioHi, "center"); ctx.globalAlpha = 1; }
   function renderReveal() { var rv = G.reveal, dur = rv.until - rv.t0, k = clamp((G.time - rv.t0) / dur, 0, 1);
-    ctx.fillStyle = "#010305"; ctx.fillRect(0, 0, W, H);
-    var ease = k < 0.15 ? (k / 0.15) : 1, fade = k > 0.85 ? (1 - (k - 0.85) / 0.15) : 1, fr = Math.max(W, H) * (0.16 + k * 0.16), fx = W * 0.5, fy = H * 0.5;
-    var lg = ctx.createRadialGradient(fx, fy + fr * 0.7, 0, fx, fy + fr * 0.7, fr * 1.5); lg.addColorStop(0, "rgba(64,74,60,0.42)"); lg.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.save(); ctx.globalAlpha = ease * fade; ctx.fillStyle = lg; ctx.fillRect(0, 0, W, H); Art.drawMutationFace(ctx, fx, fy, fr, { smile: 0.35 + k * 0.6, t: G.time, lit: 0.7 + k * 0.2 }); ctx.restore();
-    var vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.25, W / 2, H / 2, Math.max(W, H) * 0.72); vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(90,12,16," + (0.18 * fade).toFixed(2) + ")"); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#020608"; ctx.fillRect(0, 0, W, H);
+    var ease = k < 0.15 ? (k / 0.15) : 1, fade = k > 0.85 ? (1 - (k - 0.85) / 0.15) : 1;
+    // a faint cone of light from the sub so the mass has something to eclipse as it crosses
+    var bg = ctx.createRadialGradient(W / 2, H * 0.42, 4, W / 2, H * 0.55, Math.max(W, H) * 0.6);
+    bg.addColorStop(0, "rgba(16,40,46,0.5)"); bg.addColorStop(1, "rgba(2,6,8,0)"); ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    // something IMMENSE crosses the deep, eclipsing it — a discrete looming mass, never resolved, never a model
+    var fr = Math.max(W, H) * (0.42 + k * 0.22), fx = W * (1.35 - k * 0.85), fy = H * (0.5 + Math.sin(k * 2) * 0.05);
+    ctx.save(); ctx.globalAlpha = ease * fade; Art.drawShadowMass(ctx, fx, fy, fr, { t: G.time, lit: 0.45, elong: 1.6 }); ctx.restore();
+    // pressure on the glass — a faint flexing rim + a sick red vignette
+    var vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.22, W / 2, H / 2, Math.max(W, H) * 0.72); vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(70,14,20," + (0.22 * fade).toFixed(2) + ")"); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
     if (G.time > rv.until) G.reveal = null; }
   function updateCamera(s) { // critically-damped look spring (no overshoot -> no nausea) + auto-return home
     var c = G.cam, KY = 0.62, KU = 0.34, KD = 0.40;
@@ -250,7 +255,7 @@
       lamp: { o2: 0, hull: 0, wake: 0 }, endKind: null, won: false, menuSel: 0, padActive: false,
       hatch: { x: 0, y: 0 }, start: { x: 0, y: 0 }, loreSeen: [], pingFlash: 0, sweep: 0,
       // full-horror state: sanity ("the dark notices you"), CRT glitch pulse, the radio, idle clock
-      sanity: 1, glitch: 0, radio: null, idleT: 0, srcSaid: false,
+      sanity: 1, glitch: 0, radio: null, idleT: 0, srcSaid: false, flare: 0,
       cine: null, descentFx: null, mutSeen: false, reveal: null, hands: { lx: 0, ly: 0, rx: 0, ry: 0, lR: 0, rR: 0 },
       // look-around camera (eased yaw/pitch); shake is NEVER written here (kept transient in render)
       cam: { yaw: 0, pitch: 0, vYaw: 0, vPitch: 0, tgtYaw: 0, tgtPitch: 0, idle: 0, active: 0, lastLook: -9, _swayY: 0, _swayP: 0 },
@@ -359,7 +364,7 @@
     return moved;
   }
 
-  function startRun() { G.layer = 1; G.hull = effMaxHull(); G.oxygen = effMaxOxygen(); G.threat = 0; G.lightOn = false; G.leak = 0; G.leakStep = 0; G.scare = null; G.won = false; G.endKind = null;
+  function startRun() { G.layer = 1; G.hull = effMaxHull(); G.oxygen = effMaxOxygen(); G.threat = 0; G.lightOn = false; G.flare = 0; G.leak = 0; G.leakStep = 0; G.scare = null; G.won = false; G.endKind = null;
     G.sanity = 1; G.glitch = 0; G.idleT = 0; G.srcSaid = false; G.patches = CFG.startPatches; G.loreSeen = [];
     G.passby = null; G.passT = 4; G.valveAngle = 0; G.valveSpin = 0;
     G.cam.yaw = G.cam.pitch = G.cam.vYaw = G.cam.vPitch = G.cam.tgtYaw = G.cam.tgtPitch = 0; G.cam.active = 0; // each dive starts facing the window
@@ -473,7 +478,10 @@
     Audio.ping(); radioTutorial("firstPing");
     if (G.threat >= CFG.wake) moveAnglers(); // a loud ping makes the Anglers shift
   }
-  function toggleLight() { if (G.scene !== "dive" || G.lock) return; press("light"); Audio.init(); G.lightOn = !G.lightOn; Audio.vent(); }
+  // FLASH: a single quick flare of the floodlight — a brief glimpse of the dark, then it's gone. Bright = noticed.
+  function doFlash() { if (G.scene !== "dive" || G.lock || G.reveal || G.descentFx) return; press("light"); Audio.init();
+    G.flare = 1; G.pingFlash = Math.max(G.pingFlash, 0.6); G.threat = clamp(G.threat + CFG.threatLight * 3, 0, 100); Audio.vent(); }
+  var toggleLight = doFlash; // keep the old name for the key/pad/touch bindings
   function flagFaced() { if (G.scene !== "dive" || G.transit || G.lock) return; var c = cell(G.sub.cx + G.facing.dx, G.sub.cy + G.facing.dy); flagCell(c); }
   function flagCell(c) { if (!c || c.seen) return; c.flagged = !c.flagged; G.confirmDir = null; Audio.card(); if (c.flagged) radioTutorial("firstFlag"); }
 
@@ -497,6 +505,7 @@
     if (G.scene !== "dive") return;
     updateCamera(s); // look-around spring runs every dive frame (incl. lock + scare) so the view never freezes
     if (G.descentFx) { G.descentFx.t += s; if (G.descentFx.t >= G.descentFx.dur) G.descentFx = null; }
+    if (G.flare > 0) G.flare = Math.max(0, G.flare - s * 0.7); G.lightOn = G.flare > 0.12; // the flash decays; light is only ever a brief glimpse
     G.valveAngle += G.valveSpin * s; G.valveSpin += (0 - G.valveSpin) * Math.min(1, s * 4);
 
     if (G.transit) { G.transit.t += s / CFG.moveGlide; if (G.transit.t >= 1) resolveArrive(G.transit); }
@@ -708,6 +717,7 @@
       var sp = 0.18; h.lx += (ltx - h.lx) * sp; h.ly += (lty - h.ly) * sp; h.rx += (rtx - h.rx) * sp; h.ry += (rty - h.ry) * sp;
       h.lR += ((crankAct ? 1 : 0) - h.lR) * sp; h.rR += ((pick ? 1 : 0) - h.rR) * sp;
       var par = -(G.cam.yaw) * W * 0.10;
+      Art.drawBody(ctx, { t: G.time, w: W, h: H, sanity: G.sanity, par: par * 0.6 }); // seated pilot torso/lap
       Art.drawHands(ctx, { lx: h.lx + par, ly: h.ly, rx: h.rx + par, ry: h.ry, lReach: h.lR, rReach: h.rR, t: G.time, sanity: G.sanity, restY: restY, w: W });
     })();
     ctx.restore();
@@ -819,7 +829,7 @@
       if (bx1 > bx0) Art.consoleHousing(ctx, { x: bx0, y: by0, w: bx1 - bx0, h: by1 - by0 }, { inset: 9 }); }
     for (var i = 0; i < effPings(); i++) { var on = i < G.pings; var dx = pb.x + 8 + i * 12, dy = pb.y - 8; ctx.beginPath(); ctx.arc(dx, dy, 3.5, 0, 7); ctx.fillStyle = on ? PAL.bioHi : "#13201a"; ctx.fill(); ctx.strokeStyle = PAL.phosLo; ctx.lineWidth = 1; ctx.stroke(); }
     Art.button(ctx, pb, "PING", { primary: G.pingFlash > 0.4, hover: UI.hover === "ping", disabled: G.pings <= 0, depth: btnDepth("ping") });
-    Art.button(ctx, L.btn.light, "LIGHT" + (G.lightOn ? " •" : ""), { primary: G.lightOn, hover: UI.hover === "light", depth: btnDepth("light") });
+    Art.button(ctx, L.btn.light, "✦ FLASH", { primary: G.flare > 0.25, hover: UI.hover === "light", depth: btnDepth("light") });
     var narrow = L.btn.excavate.w < 88;
     Art.button(ctx, L.btn.excavate, G.lock ? "LOCK!" : (narrow ? "SIG" : "SECURE"), { primary: G.lock || G.onLoot, hover: UI.hover === "excavate", disabled: !G.lock && !G.onLoot, depth: btnDepth("excavate") });
     Art.button(ctx, L.btn.patch, (narrow ? "FIX " : "PATCH ") + G.patches, { hover: UI.hover === "patch", disabled: G.patches <= 0 || G.hull >= effMaxHull(), depth: btnDepth("patch") });
@@ -871,15 +881,11 @@
         ctx.stroke(); }
       ctx.fillStyle = "rgba(235,245,248," + (0.6 * grow).toFixed(2) + ")"; ctx.beginPath(); ctx.arc(ix, iy, 3 + grow * 5, 0, 7); ctx.fill(); ctx.restore();
     }
-    // (4) the SMILING FACE — first beats stay a black eclipse, then the mutation's face lunges out and holds the smile
-    if (k > 0.34) {
-      var fk = clamp((k - 0.34) / 0.30, 0, 1), hold = clamp(1 - (k - 0.78) / 0.22, 0, 1), fr = Math.max(W, H) * (0.20 + fk * 0.34);
-      var fx = W * 0.5 + (nz(2) - 0.5) * W * 0.06, fy = H * 0.48 + (nz(3) - 0.5) * H * 0.06;
-      ctx.save(); ctx.globalAlpha = hold * (0.55 + fk * 0.45);
-      var lg = ctx.createRadialGradient(fx, fy + fr * 0.6, 0, fx, fy + fr * 0.6, fr * 1.4); lg.addColorStop(0, "rgba(70,80,66,0.5)"); lg.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = lg; ctx.fillRect(0, 0, W, H);
-      Art.drawMutationFace(ctx, fx, fy, fr, { smile: 0.7 + fk * 0.3, t: G.time, lit: 0.85 });
-      ctx.restore();
+    // (4) NO creature — a colossal SHADOW surges across the glass and blots out the light (suggestion only)
+    if (k > 0.30) {
+      var fk = clamp((k - 0.30) / 0.30, 0, 1), hold = clamp(1 - (k - 0.82) / 0.18, 0, 1), fr = Math.max(W, H) * (0.6 + fk * 0.7);
+      var sx2 = W * (0.5 + (nz(2) - 0.5) * 0.5) - fr * 0.3 + fk * fr * 0.5, sy2 = H * (0.5 + (nz(3) - 0.5) * 0.3);
+      ctx.save(); ctx.globalAlpha = hold; Art.drawShadowMass(ctx, sx2, sy2, fr, { t: G.time, lit: 0.35 + fk * 0.4, elong: 1.5 }); ctx.restore();
     } else if (Math.sin(G.time * 90) > 0.86) {
       var ex = W * (0.40 + nz(2) * 0.20), ey = H * (0.44 + nz(3) * 0.16), er = Math.max(W, H) * (0.55 + nz(4) * 0.25);
       var sg = ctx.createRadialGradient(ex, ey, er * 0.15, ex, ey, er); sg.addColorStop(0, "rgba(0,0,0,0.98)"); sg.addColorStop(0.82, "rgba(2,5,8,0.92)"); sg.addColorStop(1, "rgba(2,5,8,0)");

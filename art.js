@@ -708,9 +708,9 @@
       var fog2 = Math.max(0, 1 - k.rz / range), sz2 = Math.min(bh * 0.8, (focal * 1.7) / k.rz);
       if (k.isMonster) {
         var seen = lightOn ? Math.max(fog2, 0.4) : (k.rz < 16 ? (16 - k.rz) / 16 * 0.7 : 0.05);
-        // a half-seen drowned FACE in the trench ahead (dim; the uncanny mutation)
-        var fsz = (k.monShape === "mutationKing" ? sz2 * 0.9 : sz2 * 0.62);
-        drawMutation(ctx, x, y, fsz, { yaw: Math.sin(t * 0.5 + k.rz) * 0.35, pitch: -0.06 + Math.sin(t * 0.4) * 0.05, smile: 0.7, t: t, lit: seen * 0.85 });
+        // NEVER a creature model — only a vast dark mass moving in the trench ahead
+        var fsz = (k.monShape === "mutationKing" ? sz2 * 1.5 : sz2 * 0.95);
+        drawShadowMass(ctx, x, y, fsz, { t: t + k.rz, lit: seen * 0.7, elong: k.monShape === "mutationKing" ? 1.5 : 1.1 });
       } else {
         var glowSeen = lightOn ? fog2 : (k.rz < 22 ? Math.max(0, (22 - k.rz) / 22) * 0.4 : 0); if (glowSeen <= 0.02) continue;
         var col = k.kind === "vent" ? PAL.phos : k.kind === "source" ? PAL.violetHi : k.kind === "artifact" ? PAL.bio : PAL.bioHi;
@@ -1256,6 +1256,37 @@
     ctx.restore();
   }
 
+  // ---------- the unseen thing: ONLY ever a vast dark mass moving (no model, no face) ----------
+  function drawShadowMass(ctx, cx, cy, size, o) {
+    o = o || {}; var t = o.t || 0, lit = o.lit == null ? 0.5 : o.lit, elong = o.elong || 1, drift = Math.sin(t * 0.5) * size * 0.06;
+    ctx.save();
+    // a faint cold rim so the dark reads as a PRESENCE, not just emptiness
+    var rim = ctx.createRadialGradient(cx + drift, cy, size * 0.3, cx + drift, cy, size * 1.05);
+    rim.addColorStop(0, "rgba(0,0,0,0)"); rim.addColorStop(0.82, "rgba(28,50,50," + (0.05 + 0.07 * lit).toFixed(3) + ")"); rim.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = rim; ctx.beginPath(); ctx.ellipse(cx + drift, cy, size * elong, size * 0.95, 0, 0, 7); ctx.fill();
+    // layered black blobs, slowly churning — an immense shape with no edges you can hold
+    for (var i = 0; i < 3; i++) { var ox = Math.sin(t * 0.4 + i * 2) * size * 0.12, oy = Math.cos(t * 0.3 + i) * size * 0.08, r = size * (0.92 - i * 0.18);
+      var bg = ctx.createRadialGradient(cx + ox + drift, cy + oy, 0, cx + ox + drift, cy + oy, r);
+      bg.addColorStop(0, "rgba(1,3,4,0.97)"); bg.addColorStop(0.6, "rgba(2,5,7,0.82)"); bg.addColorStop(1, "rgba(2,5,7,0)");
+      ctx.fillStyle = bg; ctx.beginPath(); ctx.ellipse(cx + ox + drift, cy + oy, r * elong, r * 0.92, 0, 0, 7); ctx.fill(); }
+    ctx.restore();
+  }
+  // first-person SEATED PILOT — dark low-poly suited body/lap + arms; the hands attach to it
+  function drawBody(ctx, o) {
+    o = o || {}; var t = o.t || 0, w = o.w, h = o.h, san = o.sanity == null ? 1 : o.sanity, par = o.par || 0;
+    var bob = Math.sin(t * 1.1) * (3 + (1 - san) * 9), cx = w * 0.5 + par;
+    ctx.save(); ctx.translate(0, bob);
+    // lap / thighs — two low-poly wedges filling the bottom corners
+    poly(ctx, [[cx - w * 0.42, h], [cx - w * 0.02, h], [cx - w * 0.12, h * 0.80], [cx - w * 0.34, h * 0.83]], "#161b22", "#06090c", 1.5);
+    poly(ctx, [[cx + w * 0.02, h], [cx + w * 0.42, h], [cx + w * 0.34, h * 0.83], [cx + w * 0.12, h * 0.80]], "#161b22", "#06090c", 1.5);
+    // central torso/harness rising between the thighs
+    poly(ctx, [[cx - w * 0.13, h], [cx + w * 0.13, h], [cx + w * 0.09, h * 0.74], [cx - w * 0.09, h * 0.74]], "#1b212a", "#06090c", 1.5);
+    poly(ctx, [[cx - w * 0.035, h * 0.76], [cx + w * 0.035, h * 0.76], [cx + w * 0.05, h], [cx - w * 0.05, h]], "#2a323c", null); // suit zip highlight
+    // suit buckle
+    ctx.fillStyle = "#3a2f12"; ctx.fillRect(cx - w * 0.03, h * 0.88, w * 0.06, h * 0.03);
+    ctx.restore();
+  }
+
   // ---------- cinematic 3D: low-poly oil rig + DN-7 sub (for the intro cutscene) ----------
   function boxFaces(x0, y0, z0, x1, y1, z1) { var c = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
     return [[c[0], c[1], c[2], c[3]], [c[5], c[4], c[7], c[6]], [c[4], c[0], c[3], c[7]], [c[1], c[5], c[6], c[2]], [c[3], c[2], c[6], c[7]], [c[4], c[5], c[1], c[0]]]; }
@@ -1296,7 +1327,13 @@
     for (var d = 0; d < drawn.length; d++) { var dn = drawn[d], kf = 0.2 + dn.sh * dn.sh * 0.8;
       ctx.fillStyle = "rgb(" + ((LO[0] + (HI[0] - LO[0]) * kf) | 0) + "," + ((LO[1] + (HI[1] - LO[1]) * kf) | 0) + "," + ((LO[2] + (HI[2] - LO[2]) * kf) | 0) + ")";
       ctx.beginPath(); ctx.moveTo(dn.P[0].x, dn.P[0].y); for (var q = 1; q < 4; q++) ctx.lineTo(dn.P[q].x, dn.P[q].y); ctx.closePath(); ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = "rgba(2,5,9,0.85)"; ctx.stroke(); }
-    var ph = wp([0.5, 0.2, 0.95]); if (ph.v) { glowDot(ctx, ph.x, ph.y, Math.max(2, ph.s * 0.02), PAL.amberHi, 0.8); ctx.fillStyle = PAL.amberHi; ctx.beginPath(); ctx.arc(ph.x, ph.y, Math.max(1.2, ph.s * 0.008), 0, 7); ctx.fill(); }
+    var ph = wp([0.5, 0.2, 0.95]); if (ph.v) { var pr2 = Math.max(3, ph.s * 0.022);
+      ctx.fillStyle = "#0c0f13"; ctx.beginPath(); ctx.arc(ph.x, ph.y, pr2, 0, 7); ctx.fill(); // porthole frame
+      ctx.strokeStyle = PAL.steelHi; ctx.lineWidth = 1; ctx.stroke();
+      glowDot(ctx, ph.x, ph.y, pr2 * 1.5, PAL.amberHi, 0.85); ctx.fillStyle = PAL.amberHi; ctx.beginPath(); ctx.arc(ph.x, ph.y, pr2 * 0.55, 0, 7); ctx.fill(); }
+    // tail fin (a small dark blade) so the bathysphere reads as a vessel, not a ball
+    var fa = wp([0, -0.3, -1.05]), fb = wp([0, 0.5, -1.5]), fc = wp([0, -0.7, -1.4]);
+    if (fa.v && fb.v && fc.v) { ctx.fillStyle = "#10141a"; ctx.beginPath(); ctx.moveTo(fa.x, fa.y); ctx.lineTo(fb.x, fb.y); ctx.lineTo(fc.x, fc.y); ctx.closePath(); ctx.fill(); ctx.strokeStyle = "rgba(2,5,9,0.85)"; ctx.lineWidth = 1; ctx.stroke(); }
   }
 
   root.DN = root.DN || {};
@@ -1308,8 +1345,8 @@
     drawForward: drawForward, drawOxygenTank: drawOxygenTank, drawDepthGauge: drawDepthGauge, drawWarnLamp: drawWarnLamp, drawLeak: drawLeak,
     drawPlushie: drawPlushie, drawRig: drawRig, drawAngler3D: drawAngler3D, drawBloop3D: drawBloop3D,
     drawValveWheel: drawValveWheel, drawRadio: drawRadio, drawTitleStamp: drawTitleStamp, bootFlicker: bootFlicker,
-    v3norm: v3norm, facetQuad: facetQuad, consoleHousing: consoleHousing, drawHands: drawHands,
-    drawMutation: drawMutation, drawMutationFace: drawMutationFace,
+    v3norm: v3norm, facetQuad: facetQuad, consoleHousing: consoleHousing, drawHands: drawHands, drawBody: drawBody,
+    drawMutation: drawMutation, drawMutationFace: drawMutationFace, drawShadowMass: drawShadowMass,
     drawRigMesh: drawRigMesh, drawCableSub: drawCableSub,
   };
 })(typeof window !== "undefined" ? window : this);
