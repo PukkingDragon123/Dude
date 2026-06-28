@@ -458,10 +458,10 @@
     G.pressure += (pf - G.pressure) * Math.min(1, s * 0.6);
     // ---- PRESSURE springs LEAKS on a timer that tightens with depth + noise ----
     G.leakT -= s;
-    if (G.leakT <= 0 && G.leaks.length < (2 + Math.round(pf * 2))) {
-      spawnLeak();
+    if (G.leakT <= 0) {                                       // timer expired: spring a leak if under the depth cap...
+      if (G.leaks.length < (2 + Math.round(pf * 2))) spawnLeak();
       var iv = lerp(CFG.leakIntervalBase, CFG.leakIntervalMin, pf) - (G.threat >= CFG.wake ? 3 : 0);
-      G.leakT = Math.max(CFG.leakIntervalMin, iv) * G.rng.range(0.8, 1.25);
+      G.leakT = Math.max(CFG.leakIntervalMin, iv) * G.rng.range(0.8, 1.25); // ...and ALWAYS re-roll, so a patch buys breathing room
     }
     // unpatched leaks flood the hull; an old seam BURSTS and floods twice as fast
     var floodRate = 0;
@@ -888,7 +888,8 @@
   function pushDir(dx, dy) { for (var i = heldDirs.length - 1; i >= 0; i--) if (heldDirs[i].dx === dx && heldDirs[i].dy === dy) heldDirs.splice(i, 1); heldDirs.push({ dx: dx, dy: dy }); }
   function popDir(dx, dy) { for (var i = heldDirs.length - 1; i >= 0; i--) if (heldDirs[i].dx === dx && heldDirs[i].dy === dy) heldDirs.splice(i, 1); }
   function clearDirs() { heldDirs.length = 0; padHeld = null; }
-  function pumpHeldDrive() { if (!heldDirs.length || G.scene !== "dive" || G.view !== "radar" || G.transit || G.detonate || G.descentFx) return; var d = heldDirs[heldDirs.length - 1]; tryDrive(d.dx, d.dy); }
+  function pumpHeldDrive() { if (!heldDirs.length || G.confirmDir || G.scene !== "dive" || G.view !== "radar" || G.transit || G.detonate || G.descentFx) return; var d = heldDirs[heldDirs.length - 1]; tryDrive(d.dx, d.dy); }
+  // ^ G.confirmDir guard: a HELD key must NOT auto-satisfy the flag-confirm gate — a real release+re-press is required.
   function dpadDirAt(p) { var d = dpadRects(); if (inside(d.up, p)) return [0, -1]; if (inside(d.down, p)) return [0, 1]; if (inside(d.left, p)) return [-1, 0]; if (inside(d.right, p)) return [1, 0]; return null; }
   function pt(e) { var rect = canvas.getBoundingClientRect(); var s = e.touches && e.touches[0] ? e.touches[0] : (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e; return { x: s.clientX - rect.left, y: s.clientY - rect.top }; }
   function gridCellAt(p) { if (!L._grid) return null; var g = L._grid; var cx = Math.floor((p.x - g.gx) / (g.cell + g.gap)), cy = Math.floor((p.y - g.gy) / (g.cell + g.gap)); if (cx < 0 || cy < 0 || cx >= G.gw || cy >= G.gh) return null; return { x: cx, y: cy }; }
