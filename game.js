@@ -186,14 +186,30 @@
       var sz = clamp(p.s * 0.02, 0.6, 5) * (0.5 + pl); ctx.fillStyle = "rgba(190,220,225," + (0.10 + 0.25 * pl).toFixed(2) + ")"; ctx.beginPath(); ctx.arc(p.x, p.y, sz, 0, 7); ctx.fill(); }
     ctx.restore();
     var m = proj([0, -26, 0]); if (m.v) { var rr = Math.max(W, H) * (0.18 + pl * 0.7), mg = ctx.createRadialGradient(m.x, m.y, rr * 0.1, m.x, m.y, rr); mg.addColorStop(0, "rgba(0,0,0,0.96)"); mg.addColorStop(0.7, "rgba(2,6,10,0.7)"); mg.addColorStop(1, "rgba(2,6,10,0)"); ctx.fillStyle = mg; ctx.beginPath(); ctx.arc(m.x, m.y, rr, 0, 7); ctx.fill(); } }
+  function drawIntroRain(uw) {
+    if (uw > 0.85) return; var a = (1 - uw);
+    ctx.save(); ctx.strokeStyle = "rgba(170,195,210," + (0.20 * a).toFixed(2) + ")"; ctx.lineWidth = 1;
+    for (var i = 0; i < 110; i++) { var sx = (i * 53) % W, sy = ((i * 97 + G.time * 1300) % (H + 40)) - 20; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx - 7, sy + 24); ctx.stroke(); }
+    ctx.restore();
+    // a forked lightning bolt + sky flash, rare and brief
+    if (Math.sin(G.time * 0.9) * Math.sin(G.time * 0.37) > 0.95) {
+      ctx.save(); ctx.fillStyle = "rgba(180,200,230," + (0.4 * a).toFixed(2) + ")"; ctx.fillRect(0, 0, W, H * 0.7);
+      ctx.strokeStyle = "rgba(225,238,255,0.92)"; ctx.lineWidth = 2.5; ctx.beginPath();
+      var lx = W * (0.28 + 0.44 * ((G.time * 7) % 1)); ctx.moveTo(lx, 0);
+      for (var s = 1; s <= 6; s++) ctx.lineTo(lx + Math.sin(s * 9.3 + G.time) * 34, s / 6 * H * 0.62); ctx.stroke(); ctx.restore();
+    }
+  }
   function renderIntro() {
     var C = G.cine, kf = C ? camAt(C.keys, C.t) : { eye: [0, 8, -12], tgt: [0, 2, 0], fov: 1.2, roll: 0 };
     var pl = C ? clamp((C.t - 10.2) / 3.3, 0, 1) : 0, uw = C ? clamp((C.t - 8.6) / 1.6, 0, 1) : 0;
     var shx = 0, shy = 0; if (OPT.shake && G.shake > 0) { shx = (Math.random() - 0.5) * G.shake; shy = (Math.random() - 0.5) * G.shake; }
     ctx.save(); ctx.translate(shx, shy);
     var proj = makeCam(kf.eye, kf.tgt, kf.fov, kf.roll, W, H);
-    drawIntroSky(uw, pl); Art.drawRigMesh(ctx, proj, G.time, uw); Art.drawCableSub(ctx, proj, G.time, C ? C.t : 0); if (uw > 0) drawIntroPlunge(proj, uw, pl);
+    drawIntroSky(uw, pl);
+    if (uw < 0.92) Art.drawOcean(ctx, proj, G.time, { amp: 1.0 + uw * 0.8 });   // the storm sea (waves grow as we drop in)
+    Art.drawRigMesh(ctx, proj, G.time, uw); Art.drawCableSub(ctx, proj, G.time, C ? C.t : 0); if (uw > 0) drawIntroPlunge(proj, uw, pl);
     ctx.restore();
+    drawIntroRain(uw);   // driving rain + the odd lightning fork (screen-space, over the scene)
     var bar = clamp(H * 0.10, 28, 90); ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, bar); ctx.fillRect(0, H - bar, W, bar);
     var iT = C ? C.t : 0;
     if (iT < 3.0) { ctx.save(); ctx.globalAlpha = clamp(1 - iT / 3, 0, 1) * Art.bootFlicker(iT + 0.3, 1.0);
@@ -708,7 +724,7 @@
     drawLamps(); drawControls();
     // first-person hands: left reaches the valve while cranking; right reaches the freshest pressed control
     (function poseHands() {
-      var h = G.hands, restY = H + H * 0.06, lipL = W * 0.22, lipR = W * 0.78;
+      var h = G.hands, restY = H * 0.95, lipL = W * 0.2, lipR = W * 0.8;
       var crankAct = Math.abs(G.valveSpin) > 0.05, vc2 = STA.valve.scr;
       var ltx = (vc2 && vc2.visible) ? vc2.sx : lipL, lty = (vc2 && vc2.visible && crankAct) ? vc2.sy : restY;
       var rtx = lipR, rty = restY, freshest = -1, pick = null, ids = ["ping", "light", "excavate", "patch", "up", "down", "left", "right", "brief"];

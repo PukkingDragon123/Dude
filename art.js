@@ -430,17 +430,25 @@
 
   // 3D-extruded button: a cap that floats above an extruded skirt and DEPRESSES when pressed.
   // Same signature; opts.depth = px the cap is raised (0 = fully pressed). Hit rect r is unchanged.
+  // fully-extruded 3D keycap: a socket, two perspective side walls, and a raised top face. Hit-rect r is unchanged.
   function button(ctx, r, label, opts) {
-    opts = opts || {}; var d = opts.depth == null ? 4 : opts.depth; if (opts.disabled) d = 1;
-    ctx.fillStyle = "#0c0f13"; rrect(ctx, r.x, r.y - d + 2, r.w, r.h, 5); ctx.fill();   // skirt under the cap (the extrusion)
-    ctx.fillStyle = "#14181e"; ctx.beginPath(); ctx.moveTo(r.x + r.w, r.y - d); ctx.lineTo(r.x + r.w, r.y + r.h); ctx.lineTo(r.x + r.w - 2, r.y + r.h); ctx.lineTo(r.x + r.w - 2, r.y - d); ctx.closePath(); ctx.fill();
-    var cy = r.y - d;
-    var grd = ctx.createLinearGradient(r.x, cy, r.x, cy + r.h);
-    grd.addColorStop(0, opts.primary ? "#3a2f12" : PAL.steelHi); grd.addColorStop(1, opts.primary ? "#1c1606" : PAL.steelLo);
-    ctx.fillStyle = opts.disabled ? "#15181d" : grd; rrect(ctx, r.x, cy, r.w, r.h, 5); ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.10)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(r.x + 3, cy + 1.5); ctx.lineTo(r.x + r.w - 3, cy + 1.5); ctx.stroke();
-    ctx.strokeStyle = opts.hover ? PAL.amberHi : (opts.primary ? PAL.amber : PAL.steel); ctx.lineWidth = opts.hover ? 2 : 1.2; rrect(ctx, r.x, cy, r.w, r.h, 5); ctx.stroke();
-    text(ctx, label, r.x + r.w / 2, cy + r.h / 2 + Math.round(r.h * 0.18), Math.min(18, Math.round(r.h * 0.42)), opts.disabled ? PAL.textDim : (opts.primary ? PAL.amberHi : PAL.text), "center");
+    opts = opts || {}; var d = opts.depth == null ? 5 : opts.depth; if (opts.disabled) d = 1.5;
+    var x = r.x, y = r.y, w = r.w, h = r.h, dx = d * 0.55, cy = y - d;     // cap lifted up + body falls toward bottom-right
+    // recessed socket the cap sits in
+    ctx.fillStyle = "#05080b"; rrect(ctx, x - 2, y - 1, w + dx + 3, h + 3, 7); ctx.fill();
+    // extruded body — right wall then bottom wall (the two faces a top-left light reveals)
+    var rw = ctx.createLinearGradient(x + w, 0, x + w + dx, 0); rw.addColorStop(0, opts.primary ? "#241b08" : "#222932"); rw.addColorStop(1, "#0a0d11");
+    ctx.fillStyle = rw; ctx.beginPath(); ctx.moveTo(x + w, cy); ctx.lineTo(x + w + dx, y); ctx.lineTo(x + w + dx, y + h); ctx.lineTo(x + w, cy + h); ctx.closePath(); ctx.fill();
+    var bw = ctx.createLinearGradient(0, cy + h, 0, y + h); bw.addColorStop(0, opts.primary ? "#1a1305" : "#171c23"); bw.addColorStop(1, "#070a0d");
+    ctx.fillStyle = bw; ctx.beginPath(); ctx.moveTo(x, cy + h); ctx.lineTo(x + w, cy + h); ctx.lineTo(x + w + dx, y + h); ctx.lineTo(x + dx, y + h); ctx.closePath(); ctx.fill();
+    // raised top face
+    var grd = ctx.createLinearGradient(x, cy, x, cy + h);
+    grd.addColorStop(0, opts.primary ? "#4a3a16" : PAL.steelHi); grd.addColorStop(0.5, opts.primary ? "#2c2109" : PAL.steel); grd.addColorStop(1, opts.primary ? "#1c1606" : PAL.steelLo);
+    ctx.fillStyle = opts.disabled ? "#15181d" : grd; rrect(ctx, x, cy, w, h, 5); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.13)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x + 3, cy + 1.5); ctx.lineTo(x + w - 3, cy + 1.5); ctx.stroke();  // top bevel highlight
+    ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.beginPath(); ctx.moveTo(x + 3, cy + h - 1); ctx.lineTo(x + w - 3, cy + h - 1); ctx.stroke();                          // lower-edge shade
+    ctx.strokeStyle = opts.hover ? PAL.amberHi : (opts.primary ? PAL.amber : PAL.steel); ctx.lineWidth = opts.hover ? 2 : 1.2; rrect(ctx, x, cy, w, h, 5); ctx.stroke();
+    text(ctx, label, x + w / 2, cy + h / 2 + Math.round(h * 0.18), Math.min(18, Math.round(h * 0.42)), opts.disabled ? PAL.textDim : (opts.primary ? PAL.amberHi : PAL.text), "center");
   }
 
   // full aged-CRT composite. opts: {scanlines, flash, flashCol, sanity, time, glitch, grade, pixel}
@@ -1149,6 +1157,7 @@
   }
 
   // ============ low-poly helpers + new 3D art (cutscene rig/sub, mutation face, hands, housings) ============
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   function lerp(a, b, t) { return a + (b - a) * t; }
   // flat-shaded faceted quad: fill + a darker same-hue crease stroke (the low-poly "stepped" look)
   function facetQuad(ctx, p0, p1, p2, p3, lo, hi, sh, amb) {
@@ -1172,22 +1181,70 @@
     ctx.fillStyle = PAL.rivet; var nb = Math.max(4, (r.w / 44) | 0); for (var i = 0; i <= nb; i++) { ctx.beginPath(); ctx.arc(x0 + (r.w + inset * 2) * i / nb, y0 + 3, 1.8, 0, 7); ctx.fill(); }
   }
   // first-person low-poly gloved hands (foreground)
+  // full low-poly 3D gloved hands: faceted phalanges/palm/thumb/cuff, normal-shaded, perspective-projected
   function drawHands(ctx, o) {
     o = o || {}; var t = o.t || 0, san = o.sanity == null ? 1 : o.sanity, restY = o.restY, WW = o.w;
-    var breathe = Math.sin(t * 1.1) * (4 + (1 - san) * 10), GLO = [18, 22, 26], GHI = [66, 76, 82];
+    var breathe = Math.sin(t * 1.1) * (4 + (1 - san) * 10);
+    var GLO = [22, 27, 34], GHI = [128, 142, 158];         // worn rubber glove, faint cold steel cast
+    var CLO = [15, 18, 24], CHI = [80, 90, 104];           // canvas cuff / forearm (duller, grounds the hand)
+    var light = v3norm([-0.34, 0.72, 0.58]);               // cabin lamp: upper-left, toward the glass
+    var FOC = WW * 1.2;
     function hand(wx, wy, reach, mirror) {
-      var ry = wy + (1 - reach) * (restY - wy) + breathe, s = WW * 0.10, dir = mirror ? -1 : 1;
-      ctx.save(); ctx.translate(wx, ry); ctx.scale(dir, 1);
-      poly(ctx, [[-s * 0.5, s * 2.6], [s * 0.5, s * 2.6], [s * 0.62, s * 0.5], [-s * 0.42, s * 0.5]], "rgb(" + (GLO[0] * 1.4 | 0) + "," + (GLO[1] * 1.4 | 0) + "," + (GLO[2] * 1.4 | 0) + ")", "#06090c", 1.2);
-      poly(ctx, [[-s * 0.55, s * 0.55], [s * 0.6, s * 0.5], [s * 0.5, -s * 0.35], [-s * 0.45, -s * 0.3]], "rgb(" + ((GLO[0] + (GHI[0] - GLO[0]) * 0.72) | 0) + "," + ((GLO[1] + (GHI[1] - GLO[1]) * 0.72) | 0) + "," + ((GLO[2] + (GHI[2] - GLO[2]) * 0.72) | 0) + ")", "#07090d", 1.2);
-      var curl = 0.5 - reach * 0.45;
-      for (var f = 0; f < 4; f++) { var fx = (-0.34 + f * 0.30) * s * 1.05, base = -s * 0.3, len = s * (0.85 - f * 0.05);
-        var midx = fx + Math.sin(curl) * len * 0.3, midy = base - Math.cos(curl) * len * 0.55, tipx = midx + Math.sin(curl * 0.6) * len * 0.25, tipy = midy - Math.cos(curl * 0.6) * len * 0.5, k = 0.55 + f * 0.06;
-        ctx.strokeStyle = "rgb(" + ((GLO[0] + (GHI[0] - GLO[0]) * k) | 0) + "," + ((GLO[1] + (GHI[1] - GLO[1]) * k) | 0) + "," + ((GLO[2] + (GHI[2] - GLO[2]) * k) | 0) + ")";
-        ctx.lineCap = "round"; ctx.lineWidth = s * 0.16; ctx.beginPath(); ctx.moveTo(fx, base); ctx.lineTo(midx, midy); ctx.lineTo(tipx, tipy); ctx.stroke(); }
-      ctx.strokeStyle = "rgb(" + ((GLO[0] + (GHI[0] - GLO[0]) * 0.6) | 0) + "," + ((GLO[1] + (GHI[1] - GLO[1]) * 0.6) | 0) + "," + ((GLO[2] + (GHI[2] - GLO[2]) * 0.6) | 0) + ")";
-      ctx.lineWidth = s * 0.2; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(-s * 0.45, s * 0.15); ctx.lineTo(-s * 0.7, -s * 0.2 + reach * s * 0.2); ctx.stroke();
-      ctx.restore();
+      reach = clamp(reach, 0, 1);
+      var oy = wy + (1 - reach) * (restY - wy) + breathe, dir = mirror ? -1 : 1, S = WW * 0.05, curl = (1 - reach) * 0.72;
+      var faces = [];
+      function P(v) { var f = FOC / (FOC - v[2] * S); return [wx + v[0] * S * f, oy - v[1] * S * f, v[2]]; }
+      function pushBox(c, lo, hi) {                          // c = 8 model corners; emit 6 outward-normal quads
+        var cen = [0, 0, 0], k; for (k = 0; k < 8; k++) { cen[0] += c[k][0]; cen[1] += c[k][1]; cen[2] += c[k][2]; }
+        cen = [cen[0] / 8, cen[1] / 8, cen[2] / 8];
+        var idx = [[0, 1, 2, 3], [5, 4, 7, 6], [4, 5, 1, 0], [3, 2, 6, 7], [4, 0, 3, 7], [1, 5, 6, 2]];
+        for (var i = 0; i < 6; i++) { var a = c[idx[i][0]], b = c[idx[i][1]], cc = c[idx[i][2]], d2 = c[idx[i][3]];
+          var n = v3norm(v3cross(v3sub(b, a), v3sub(d2, a)));
+          var fx = (a[0] + b[0] + cc[0] + d2[0]) / 4 - cen[0], fy = (a[1] + b[1] + cc[1] + d2[1]) / 4 - cen[1], fz = (a[2] + b[2] + cc[2] + d2[2]) / 4 - cen[2];
+          if (n[0] * fx + n[1] * fy + n[2] * fz < 0) n = [-n[0], -n[1], -n[2]];
+          faces.push({ m: [a, b, cc, d2], n: n, lo: lo, hi: hi }); }
+      }
+      // oriented tapered box segment: from (bx,by,bz) along (dx,dy,dz); width hw, thickness ht, tip scaled by taper
+      function seg(bx, by, bz, dx, dy, dz, hw, ht, taper, lo, hi) {
+        var ex = bx + dx, ey = by + dy, ez = bz + dz, L = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        var ax = [dx / L, dy / L, dz / L], up = v3norm(v3cross(ax, [1, 0, 0])); if (!isFinite(up[0])) up = [0, 0, 1];
+        var side = v3norm(v3cross(up, ax));
+        function cc(px, py, pz, sw, st) { return [dir * (px + side[0] * sw + up[0] * st), py + side[1] * sw + up[1] * st, pz + side[2] * sw + up[2] * st]; }
+        var w1 = hw * taper, t1 = ht * taper;
+        pushBox([cc(bx, by, bz, -hw, -ht), cc(bx, by, bz, hw, -ht), cc(bx, by, bz, hw, ht), cc(bx, by, bz, -hw, ht),
+          cc(ex, ey, ez, -w1, -t1), cc(ex, ey, ez, w1, -t1), cc(ex, ey, ez, w1, t1), cc(ex, ey, ez, -w1, t1)], lo, hi);
+        return [ex, ey, ez];
+      }
+      function abox(cx, cy, cz, hx, hy, hz, lo, hi) {        // axis-aligned box (palm, cuff)
+        pushBox([[dir * (cx - hx), cy - hy, cz - hz], [dir * (cx + hx), cy - hy, cz - hz], [dir * (cx + hx), cy - hy, cz + hz], [dir * (cx - hx), cy - hy, cz + hz],
+          [dir * (cx - hx), cy + hy, cz - hz], [dir * (cx + hx), cy + hy, cz - hz], [dir * (cx + hx), cy + hy, cz + hz], [dir * (cx - hx), cy + hy, cz + hz]], lo, hi);
+      }
+      function finger(bx, lens, hw, splay, extra) {
+        var ang = 0.08 + curl * (0.40 + extra), px = bx, py = 0.0, pz = 0.16, sp = splay * (0.34 + reach * 0.8);
+        for (var s = 0; s < lens.length; s++) {
+          var L = lens[s], dy = Math.cos(ang) * L, dz = Math.sin(ang) * L, dx = sp * L * 0.22;
+          var tip = seg(px, py, pz, dx, dy, dz, hw * (1 - s * 0.13), hw * 0.84 * (1 - s * 0.08), 0.84, GLO, GHI);
+          px = tip[0]; py = tip[1]; pz = tip[2]; ang += 0.30 + curl * (0.92 + extra * 0.5);
+        }
+      }
+      // forearm + glove cuff first (drawn under the hand via depth sort)
+      seg(0, -1.95, -0.05, 0.95 + curl * 0.1, -1.8, -0.35, 0.82, 0.66, 0.92, CLO, CHI);  // forearm into the lower corner
+      abox(0, -1.62, 0.04, 0.92, 0.52, 0.46, CLO, CHI);                                    // thick glove cuff
+      abox(0, -0.78, 0.16, 0.86, 0.82, 0.30, GLO, GHI);                                    // palm (flatter box)
+      finger(-0.57, [0.60, 0.40, 0.29], 0.205, -1.0, 0.04);  // index
+      finger(-0.19, [0.70, 0.47, 0.32], 0.215, -0.25, 0.0);  // middle (longest)
+      finger(0.21, [0.62, 0.43, 0.30], 0.195, 0.45, 0.02);   // ring
+      finger(0.57, [0.46, 0.33, 0.24], 0.165, 1.15, 0.06);   // pinky
+      var d1 = [0.42 + curl * 0.04, 0.40 - curl * 0.16, 0.30 + curl * 0.22];               // thumb (2 phalanges, opposed)
+      var tt = seg(-0.72, -1.0, 0.42, d1[0], d1[1], d1[2], 0.22, 0.20, 0.9, GLO, GHI);
+      seg(tt[0], tt[1], tt[2], 0.30 + curl * 0.1, 0.32 - curl * 0.2, 0.22 + curl * 0.28, 0.19, 0.17, 0.9, GLO, GHI);
+      // project, shade, painter-sort (far → near), fill faceted
+      var drawn = [];
+      for (var i = 0; i < faces.length; i++) { var F = faces[i], p0 = P(F.m[0]), p1 = P(F.m[1]), p2 = P(F.m[2]), p3 = P(F.m[3]);
+        var sh = Math.max(0, F.n[0] * light[0] + F.n[1] * light[1] + F.n[2] * light[2]);
+        drawn.push({ q: [p0, p1, p2, p3], z: (p0[2] + p1[2] + p2[2] + p3[2]) / 4, sh: sh, lo: F.lo, hi: F.hi }); }
+      drawn.sort(function (a, b) { return a.z - b.z; });
+      for (var d3 = 0; d3 < drawn.length; d3++) { var D = drawn[d3]; facetQuad(ctx, D.q[0], D.q[1], D.q[2], D.q[3], D.lo, D.hi, D.sh, 1); }
     }
     hand(o.lx, o.ly, o.lReach || 0, true); hand(o.rx, o.ry, o.rReach || 0, false);
   }
@@ -1287,6 +1344,27 @@
     ctx.restore();
   }
 
+  // ---------- storm OCEAN: an animated low-poly wave mesh (sum-of-sines, foam on the crests) ----------
+  function oceanH(x, z, t, amp) { return (Math.sin(x * 0.33 + t * 1.6) * 0.55 + Math.sin(z * 0.5 - t * 1.2) * 0.42 + Math.sin((x * 0.7 + z * 0.5) + t * 2.3) * 0.26 + Math.sin((x - z) * 0.95 - t * 1.7) * 0.14) * amp; }
+  function drawOcean(ctx, proj, t, o) {
+    o = o || {}; var amp = o.amp == null ? 1.0 : o.amp, N = 18, span = 48, half = span / 2;
+    var pts = []; for (var i = 0; i <= N; i++) { var row = []; for (var j = 0; j <= N; j++) { var x = -half + span * i / N, z = -half + span * j / N; row.push([x, oceanH(x, z, t, amp), z]); } pts.push(row); }
+    var quads = [];
+    for (var i2 = 0; i2 < N; i2++) for (var j2 = 0; j2 < N; j2++) {
+      var a = pts[i2][j2], b = pts[i2 + 1][j2], c = pts[i2 + 1][j2 + 1], d = pts[i2][j2 + 1];
+      var pa = proj(a), pb = proj(b), pc = proj(c), pd = proj(d); if (!(pa.v && pb.v && pc.v && pd.v)) continue;
+      // facet normal for shading (storm light from upper-left)
+      var n = v3norm(v3cross(v3sub(b, a), v3sub(d, a))); var sh = Math.max(0, n[0] * 0.3 + n[1] * 0.9 - n[2] * 0.3);
+      quads.push({ P: [pa, pb, pc, pd], z: (pa.z + pb.z + pc.z + pd.z) / 4, h: (a[1] + b[1] + c[1] + d[1]) / 4, sh: sh });
+    }
+    quads.sort(function (p, q) { return q.z - p.z; });
+    for (var k = 0; k < quads.length; k++) { var Q = quads[k], foam = clamp((Q.h - 0.55 * amp) / (0.5 * amp + 0.01), 0, 1), b2 = (0.3 + Q.sh * 0.7);
+      var col = foam > 0.55 ? "rgb(" + ((150 + foam * 70) | 0) + "," + ((178 + foam * 55) | 0) + "," + ((184 + foam * 45) | 0) + ")"
+        : "rgb(" + ((6 + b2 * 26) | 0) + "," + ((20 + b2 * 40) | 0) + "," + ((30 + b2 * 46) | 0) + ")";
+      ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(Q.P[0].x, Q.P[0].y); ctx.lineTo(Q.P[1].x, Q.P[1].y); ctx.lineTo(Q.P[2].x, Q.P[2].y); ctx.lineTo(Q.P[3].x, Q.P[3].y); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "rgba(2,8,12,0.45)"; ctx.lineWidth = 1; ctx.stroke(); }
+  }
+
   // ---------- cinematic 3D: low-poly oil rig + DN-7 sub (for the intro cutscene) ----------
   function boxFaces(x0, y0, z0, x1, y1, z1) { var c = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
     return [[c[0], c[1], c[2], c[3]], [c[5], c[4], c[7], c[6]], [c[4], c[0], c[3], c[7]], [c[1], c[5], c[6], c[2]], [c[3], c[2], c[6], c[7]], [c[4], c[5], c[1], c[0]]]; }
@@ -1294,18 +1372,37 @@
     var T = [[x - s, ty, z - s], [x + s, ty, z - s], [x + s, ty, z + s], [x - s, ty, z + s]], B = [[x - s + ox, by, z - s + oz], [x + s + ox, by, z - s + oz], [x + s + ox, by, z + s + oz], [x - s + ox, by, z + s + oz]];
     return [[T[0], T[1], B[1], B[0]], [T[1], T[2], B[2], B[1]], [T[2], T[3], B[3], B[2]], [T[3], T[0], B[0], B[3]]]; }
   function braceQuads(xL, xR, z, y0, y1) { var w = 0.12; return [[[xL, y0, z - w], [xR, y1, z - w], [xR, y1, z + w], [xL, y0, z + w]], [[xR, y0, z - w], [xL, y1, z - w], [xL, y1, z + w], [xR, y0, z + w]]]; }
+  function braceQuadsZ(zL, zR, x, y0, y1) { var w = 0.12; return [[[x - w, y0, zL], [x - w, y1, zR], [x + w, y1, zR], [x + w, y0, zL]], [[x - w, y0, zR], [x - w, y1, zL], [x + w, y1, zL], [x + w, y0, zR]]]; }
   function tetraStruts(ax, ay, az, base, top) { var f = []; for (var i = 0; i < 4; i++) { var a0 = i / 4 * Math.PI * 2, a1 = (i + 1) / 4 * Math.PI * 2; f.push([[ax + Math.cos(a0) * base, ay, az + Math.sin(a0) * base], [ax + Math.cos(a1) * base, ay, az + Math.sin(a1) * base], [ax, ay + top, az]]); } return f; }
-  function drawRigMesh(ctx, proj, t, uw) { uw = uw || 0; var light = v3norm([0.4, 0.7, -0.55]), LO = [14, 19, 25], HI = [82, 96, 108], faces = [], legX = [-3.4, 3.4], legZ = [-2.2, 2.2];
+  function drawRigMesh(ctx, proj, t, uw) { uw = uw || 0; var light = v3norm([0.4, 0.7, -0.55]), LO = [16, 22, 29], HI = [98, 114, 128], faces = [], legX = [-3.4, 3.4], legZ = [-2.2, 2.2];
+    // four splayed lattice legs into the seabed
     for (var lx = 0; lx < 2; lx++) for (var lz = 0; lz < 2; lz++) { var x = legX[lx], z = legZ[lz], bot = (x < 0 ? -0.9 : 0.9), botz = (z < 0 ? -0.6 : 0.6), bx = shearLeg(x, z, bot, botz); for (var f0 = 0; f0 < bx.length; f0++) faces.push(bx[f0]); }
-    faces.push.apply(faces, braceQuads(-3.4, 3.4, -2.2, 1, 5)); faces.push.apply(faces, braceQuads(-3.4, 3.4, 2.2, 1, 5));
-    faces.push.apply(faces, boxFaces(-4.2, 6, -3.0, 4.2, 7.2, 3.0)); faces.push.apply(faces, boxFaces(-2.4, 7.2, -1.6, 1.0, 9.4, 1.4)); faces.push.apply(faces, tetraStruts(2.4, 7.2, 0, 1.4, 6.4));
+    // two-tier cross-braced jacket (front/back + both sides) — reads as a real platform truss
+    var tiers = [[2.6, 5.4], [-0.6, 2.6]];
+    for (var ti = 0; ti < tiers.length; ti++) { var y0 = tiers[ti][0], y1 = tiers[ti][1];
+      faces.push.apply(faces, braceQuads(-3.4, 3.4, -2.2, y0, y1)); faces.push.apply(faces, braceQuads(-3.4, 3.4, 2.2, y0, y1));
+      faces.push.apply(faces, braceQuadsZ(-2.2, 2.2, -3.4, y0, y1)); faces.push.apply(faces, braceQuadsZ(-2.2, 2.2, 3.4, y0, y1)); }
+    // deck slab, two superstructure modules, derrick + a cantilevered helideck
+    faces.push.apply(faces, boxFaces(-4.2, 6, -3.0, 4.2, 7.2, 3.0));
+    faces.push.apply(faces, boxFaces(-2.4, 7.2, -1.6, 1.0, 9.4, 1.4));
+    faces.push.apply(faces, boxFaces(1.4, 7.2, -1.4, 3.6, 8.6, 1.2));            // second module block
+    faces.push.apply(faces, boxFaces(-4.7, 9.35, 0.2, -1.4, 9.65, 3.3));        // helideck pad (cantilevered)
+    faces.push.apply(faces, boxFaces(0.7, 9.0, -0.3, 4.1, 9.45, 0.3));          // crane jib beam over the water
+    faces.push.apply(faces, tetraStruts(2.4, 7.2, 0, 1.4, 6.4));
+    // deck-edge railing: a top rail + posts along the front
+    faces.push.apply(faces, boxFaces(-4.2, 7.62, 2.86, 4.2, 7.76, 3.02));
+    for (var rp = -4; rp <= 4; rp += 1.6) faces.push.apply(faces, boxFaces(rp - 0.05, 7.2, 2.9, rp + 0.05, 7.7, 3.0));
     var drawn = []; for (var i = 0; i < faces.length; i++) { var f = faces[i], P = [], ok = true, zc = 0;
       for (var k = 0; k < f.length; k++) { var pp = proj(f[k]); if (!pp.v) { ok = false; break; } P.push(pp); zc += pp.z; } if (!ok) continue; zc /= f.length;
       var n = v3norm(v3cross(v3sub(f[1], f[0]), v3sub(f[2], f[0]))), sh = Math.max(0, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]); drawn.push({ P: P, z: zc, sh: sh }); }
     drawn.sort(function (a, b) { return b.z - a.z; });
-    for (var d = 0; d < drawn.length; d++) { var dn = drawn[d], kf = (0.18 + dn.sh * dn.sh * 0.82) * (1 - uw * 0.55);
+    for (var d = 0; d < drawn.length; d++) { var dn = drawn[d], kf = (0.26 + dn.sh * dn.sh * 0.74) * (1 - uw * 0.42);
       ctx.fillStyle = "rgb(" + ((LO[0] + (HI[0] - LO[0]) * kf) | 0) + "," + ((LO[1] + (HI[1] - LO[1]) * kf) | 0) + "," + ((LO[2] + (HI[2] - LO[2]) * kf) | 0) + ")";
       ctx.beginPath(); ctx.moveTo(dn.P[0].x, dn.P[0].y); for (var q = 1; q < dn.P.length; q++) ctx.lineTo(dn.P[q].x, dn.P[q].y); ctx.closePath(); ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = "rgba(2,5,9,0.8)"; ctx.stroke(); }
+    // lit module windows (cold life on the platform)
+    if (uw < 0.9) { var wins = [[-2.1, 8.4, 1.42], [-1.4, 8.4, 1.42], [-0.7, 8.4, 1.42], [2.0, 8.0, 1.22], [2.9, 8.0, 1.22]];
+      for (var wi = 0; wi < wins.length; wi++) { var wp = proj(wins[wi]); if (wp.v) { glowDot(ctx, wp.x, wp.y, Math.max(2, wp.s * 0.016), "#ffd27a", 0.5 * (1 - uw)); ctx.fillStyle = "#ffce7a"; ctx.fillRect(wp.x - Math.max(1, wp.s * 0.006), wp.y - Math.max(1, wp.s * 0.008), Math.max(2, wp.s * 0.012), Math.max(2, wp.s * 0.016)); } } }
+    // flare-boom warning beacon at the derrick top
     var lp = proj([2.4, 13.6, 0]); if (lp.v && uw < 0.9) { var bl = 0.5 + 0.5 * Math.sin(t * 4); glowDot(ctx, lp.x, lp.y, Math.max(4, lp.s * 0.05), "#ff6452", bl * (1 - uw)); ctx.fillStyle = mix("#220505", "#ff6452", bl); ctx.beginPath(); ctx.arc(lp.x, lp.y, Math.max(2, lp.s * 0.012), 0, 7); ctx.fill(); }
   }
   var _dn7 = null;
@@ -1331,9 +1428,20 @@
       ctx.fillStyle = "#0c0f13"; ctx.beginPath(); ctx.arc(ph.x, ph.y, pr2, 0, 7); ctx.fill(); // porthole frame
       ctx.strokeStyle = PAL.steelHi; ctx.lineWidth = 1; ctx.stroke();
       glowDot(ctx, ph.x, ph.y, pr2 * 1.5, PAL.amberHi, 0.85); ctx.fillStyle = PAL.amberHi; ctx.beginPath(); ctx.arc(ph.x, ph.y, pr2 * 0.55, 0, 7); ctx.fill(); }
-    // tail fin (a small dark blade) so the bathysphere reads as a vessel, not a ball
+    function fquad(p, c) { var q = [wp(p[0]), wp(p[1]), wp(p[2]), wp(p[3])]; if (!(q[0].v && q[1].v && q[2].v && q[3].v)) return; ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(q[0].x, q[0].y); for (var i = 1; i < 4; i++) ctx.lineTo(q[i].x, q[i].y); ctx.closePath(); ctx.fill(); ctx.strokeStyle = "rgba(2,5,9,0.85)"; ctx.lineWidth = 1; ctx.stroke(); }
+    // conning tower / sail on top + a periscope mast
+    fquad([[-0.16, 0.9, 0.25], [0.16, 0.9, 0.25], [0.2, 0.5, 0.25], [-0.2, 0.5, 0.25]], "#222932");
+    fquad([[-0.16, 0.9, 0.25], [0.16, 0.9, 0.25], [0.13, 0.9, -0.15], [-0.13, 0.9, -0.15]], "#2c343f");
+    var m0 = wp([0, 0.9, 0.18]), m1 = wp([0, 1.25, 0.18]); if (m0.v && m1.v) { ctx.strokeStyle = "#3a424c"; ctx.lineWidth = Math.max(1.5, m1.s * 0.005); ctx.beginPath(); ctx.moveTo(m0.x, m0.y); ctx.lineTo(m1.x, m1.y); ctx.stroke(); }
+    // dive planes (side fins) + tail fin
+    fquad([[-1.05, 0.05, -0.1], [-0.7, 0.1, -0.1], [-0.7, -0.05, -0.1], [-1.05, -0.1, -0.1]], "#181d24");
+    fquad([[1.05, 0.05, -0.1], [0.7, 0.1, -0.1], [0.7, -0.05, -0.1], [1.05, -0.1, -0.1]], "#181d24");
     var fa = wp([0, -0.3, -1.05]), fb = wp([0, 0.5, -1.5]), fc = wp([0, -0.7, -1.4]);
     if (fa.v && fb.v && fc.v) { ctx.fillStyle = "#10141a"; ctx.beginPath(); ctx.moveTo(fa.x, fa.y); ctx.lineTo(fb.x, fb.y); ctx.lineTo(fc.x, fc.y); ctx.closePath(); ctx.fill(); ctx.strokeStyle = "rgba(2,5,9,0.85)"; ctx.lineWidth = 1; ctx.stroke(); }
+    // rear propeller hub + blades
+    var pc0 = wp([0, 0, -1.12]); if (pc0.v) { ctx.strokeStyle = "#3a424c"; ctx.lineWidth = Math.max(2, pc0.s * 0.01);
+      for (var pb2 = 0; pb2 < 3; pb2++) { var pa2 = pb2 / 3 * Math.PI * 2 + t * 4, bx = pc0.x + Math.cos(pa2) * pc0.s * 0.06, by = pc0.y + Math.sin(pa2) * pc0.s * 0.045; ctx.beginPath(); ctx.moveTo(pc0.x, pc0.y); ctx.lineTo(bx, by); ctx.stroke(); }
+      ctx.fillStyle = "#181d24"; ctx.beginPath(); ctx.arc(pc0.x, pc0.y, Math.max(1.5, pc0.s * 0.012), 0, 7); ctx.fill(); }
   }
 
   root.DN = root.DN || {};
@@ -1347,6 +1455,6 @@
     drawValveWheel: drawValveWheel, drawRadio: drawRadio, drawTitleStamp: drawTitleStamp, bootFlicker: bootFlicker,
     v3norm: v3norm, facetQuad: facetQuad, consoleHousing: consoleHousing, drawHands: drawHands, drawBody: drawBody,
     drawMutation: drawMutation, drawMutationFace: drawMutationFace, drawShadowMass: drawShadowMass,
-    drawRigMesh: drawRigMesh, drawCableSub: drawCableSub,
+    drawRigMesh: drawRigMesh, drawCableSub: drawCableSub, drawOcean: drawOcean,
   };
 })(typeof window !== "undefined" ? window : this);
