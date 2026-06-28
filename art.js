@@ -588,13 +588,21 @@
   function drawCell(ctx, x, y, s, c, t) {
     var r = Math.max(2, s * 0.12);
     if (c.revealed) {
-      if (c.triggered) { // a struck monster cell
-        var g = ctx.createLinearGradient(x, y, x, y + s); g.addColorStop(0, "#3a0d10"); g.addColorStop(1, "#160405");
+      if (c.triggered) { // the struck MINE — a scorched cell with a white-hot detonation star
+        var g = ctx.createLinearGradient(x, y, x, y + s); g.addColorStop(0, "#3a2208"); g.addColorStop(1, "#160a02");
         ctx.fillStyle = g; rrect(ctx, x, y, s, s, r); ctx.fill();
-        ctx.strokeStyle = PAL.blood; ctx.lineWidth = 1.4; rrect(ctx, x, y, s, s, r); ctx.stroke();
-        var cxp = x + s / 2, cyp = y + s / 2;
-        poly(ctx, [[cxp - s * 0.24, cyp - s * 0.12], [cxp + s * 0.24, cyp - s * 0.12], [cxp, cyp + s * 0.28]], PAL.bloodHi);
-        ctx.fillStyle = "#160405"; ctx.beginPath(); ctx.arc(cxp - s * 0.09, cyp - s * 0.05, s * 0.05, 0, 7); ctx.arc(cxp + s * 0.09, cyp - s * 0.05, s * 0.05, 0, 7); ctx.fill();
+        ctx.strokeStyle = "#ffae4a"; ctx.lineWidth = 1.4; rrect(ctx, x, y, s, s, r); ctx.stroke();
+        var cxp = x + s / 2, cyp = y + s / 2; glowDot(ctx, cxp, cyp, s * 0.5, "#ffd27a", 1);
+        ctx.strokeStyle = "#fff2cf"; ctx.lineWidth = 2; for (var st = 0; st < 8; st++) { var sa = st / 8 * Math.PI * 2; ctx.beginPath(); ctx.moveTo(cxp, cyp); ctx.lineTo(cxp + Math.cos(sa) * s * 0.4, cyp + Math.sin(sa) * s * 0.4); ctx.stroke(); }
+        ctx.fillStyle = "#fff2cf"; ctx.beginPath(); ctx.arc(cxp, cyp, s * 0.12, 0, 7); ctx.fill();
+      } else if (c.mon) { // a revealed (un-hit) MINE — a spiked sea-mine silhouette
+        ctx.fillStyle = "#0a0d11"; rrect(ctx, x, y, s, s, r); ctx.fill();
+        ctx.strokeStyle = "rgba(120,60,40,0.7)"; ctx.lineWidth = 1; rrect(ctx, x, y, s, s, r); ctx.stroke();
+        var mcx = x + s / 2, mcy = y + s / 2, mr = s * 0.26;
+        ctx.strokeStyle = "#5a6472"; ctx.lineWidth = Math.max(1.5, s * 0.05); for (var sp = 0; sp < 8; sp++) { var spa = sp / 8 * Math.PI * 2; ctx.beginPath(); ctx.moveTo(mcx + Math.cos(spa) * mr, mcy + Math.sin(spa) * mr); ctx.lineTo(mcx + Math.cos(spa) * mr * 1.5, mcy + Math.sin(spa) * mr * 1.5); ctx.stroke(); }
+        var mg = ctx.createRadialGradient(mcx - mr * 0.3, mcy - mr * 0.3, 1, mcx, mcy, mr); mg.addColorStop(0, "#3a424c"); mg.addColorStop(1, "#12161c");
+        ctx.fillStyle = mg; ctx.beginPath(); ctx.arc(mcx, mcy, mr, 0, 7); ctx.fill();
+        ctx.strokeStyle = "#1a1d22"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(mcx, mcy, mr, 0, 7); ctx.stroke();
       } else { // safe revealed cell, recessed phosphor face
         ctx.fillStyle = "#06100c"; rrect(ctx, x, y, s, s, r); ctx.fill();
         ctx.strokeStyle = "rgba(24,70,54,0.7)"; ctx.lineWidth = 1; rrect(ctx, x, y, s, s, r); ctx.stroke();
@@ -1184,14 +1192,17 @@
   // full low-poly 3D gloved hands: faceted phalanges/palm/thumb/cuff, normal-shaded, perspective-projected
   function drawHands(ctx, o) {
     o = o || {}; var t = o.t || 0, san = o.sanity == null ? 1 : o.sanity, restY = o.restY, WW = o.w;
-    var breathe = Math.sin(t * 1.1) * (4 + (1 - san) * 10);
+    var grip = o.grip || 0, pressure = o.pressure || 0;
+    // breathing bob + a cold high-frequency tremble that grows with the crush
+    var breathe = Math.sin(t * 1.1) * (3 + (1 - san) * 6 + pressure * 4) + Math.sin(t * 8.5) * pressure * 1.8;
     var GLO = [22, 27, 34], GHI = [128, 142, 158];         // worn rubber glove, faint cold steel cast
     var CLO = [15, 18, 24], CHI = [80, 90, 104];           // canvas cuff / forearm (duller, grounds the hand)
     var light = v3norm([-0.34, 0.72, 0.58]);               // cabin lamp: upper-left, toward the glass
     var FOC = WW * 1.2;
     function hand(wx, wy, reach, mirror) {
       reach = clamp(reach, 0, 1);
-      var oy = wy + (1 - reach) * (restY - wy) + breathe, dir = mirror ? -1 : 1, S = WW * 0.05, curl = (1 - reach) * 0.72;
+      var oy = wy + (1 - reach) * (restY - wy) + breathe, dir = mirror ? -1 : 1, S = WW * 0.05;
+      var curl = clamp((1 - reach) * 0.7 + grip * 0.55, 0, 1.15);   // fingers close when gripping (patch / wheel)
       var faces = [];
       function P(v) { var f = FOC / (FOC - v[2] * S); return [wx + v[0] * S * f, oy - v[1] * S * f, v[2]]; }
       function pushBox(c, lo, hi) {                          // c = 8 model corners; emit 6 outward-normal quads
@@ -1219,8 +1230,10 @@
         pushBox([[dir * (cx - hx), cy - hy, cz - hz], [dir * (cx + hx), cy - hy, cz - hz], [dir * (cx + hx), cy - hy, cz + hz], [dir * (cx - hx), cy - hy, cz + hz],
           [dir * (cx - hx), cy + hy, cz - hz], [dir * (cx + hx), cy + hy, cz - hz], [dir * (cx + hx), cy + hy, cz + hz], [dir * (cx - hx), cy + hy, cz + hz]], lo, hi);
       }
-      function finger(bx, lens, hw, splay, extra) {
-        var ang = 0.08 + curl * (0.40 + extra), px = bx, py = 0.0, pz = 0.16, sp = splay * (0.34 + reach * 0.8);
+      function finger(bx, lens, hw, splay, extra, fi) {
+        // each finger breathes on its own phase (idle flex), curls together when gripping
+        var idle = Math.sin(t * 1.7 + fi * 1.25 + (mirror ? 1.6 : 0)) * 0.05 * (0.4 + (1 - reach) * 0.6);
+        var ang = 0.08 + idle + curl * (0.40 + extra), px = bx, py = 0.0, pz = 0.16, sp = splay * (0.34 + reach * 0.8);
         for (var s = 0; s < lens.length; s++) {
           var L = lens[s], dy = Math.cos(ang) * L, dz = Math.sin(ang) * L, dx = sp * L * 0.22;
           var tip = seg(px, py, pz, dx, dy, dz, hw * (1 - s * 0.13), hw * 0.84 * (1 - s * 0.08), 0.84, GLO, GHI);
@@ -1231,10 +1244,10 @@
       seg(0, -1.95, -0.05, 0.95 + curl * 0.1, -1.8, -0.35, 0.82, 0.66, 0.92, CLO, CHI);  // forearm into the lower corner
       abox(0, -1.62, 0.04, 0.92, 0.52, 0.46, CLO, CHI);                                    // thick glove cuff
       abox(0, -0.78, 0.16, 0.86, 0.82, 0.30, GLO, GHI);                                    // palm (flatter box)
-      finger(-0.57, [0.60, 0.40, 0.29], 0.205, -1.0, 0.04);  // index
-      finger(-0.19, [0.70, 0.47, 0.32], 0.215, -0.25, 0.0);  // middle (longest)
-      finger(0.21, [0.62, 0.43, 0.30], 0.195, 0.45, 0.02);   // ring
-      finger(0.57, [0.46, 0.33, 0.24], 0.165, 1.15, 0.06);   // pinky
+      finger(-0.57, [0.60, 0.40, 0.29], 0.205, -1.0, 0.04, 0);  // index
+      finger(-0.19, [0.70, 0.47, 0.32], 0.215, -0.25, 0.0, 1);  // middle (longest)
+      finger(0.21, [0.62, 0.43, 0.30], 0.195, 0.45, 0.02, 2);   // ring
+      finger(0.57, [0.46, 0.33, 0.24], 0.165, 1.15, 0.06, 3);   // pinky
       var d1 = [0.42 + curl * 0.04, 0.40 - curl * 0.16, 0.30 + curl * 0.22];               // thumb (2 phalanges, opposed)
       var tt = seg(-0.72, -1.0, 0.42, d1[0], d1[1], d1[2], 0.22, 0.20, 0.9, GLO, GHI);
       seg(tt[0], tt[1], tt[2], 0.30 + curl * 0.1, 0.32 - curl * 0.2, 0.22 + curl * 0.28, 0.19, 0.17, 0.9, GLO, GHI);

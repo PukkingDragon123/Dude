@@ -106,10 +106,7 @@
   var OFF = { x: -99999, y: -99999, w: 0, h: 0 };
   function layoutStations() {
     var c = G.cam;
-    // render-only idle breathing sway (never persisted); amplifies as sanity frays — the cabin breathes wrong
-    if (c.active < 0.05 && !G.lock && !G.scare) { var amp = G.sanity < 0.4 ? (1 + (0.4 - G.sanity) * 4) : 1;
-      c._swayY = Math.sin(c.idle) * 0.012 * amp; c._swayP = Math.sin(c.idle * 0.77 + 1.3) * 0.009 * amp; }
-    else { c._swayY = 0; c._swayP = 0; }
+    c._swayY = 0; c._swayP = 0; // FIXED camera: no breathing sway, no look-around — the view never moves
     for (var k in STA) { var S = STA[k]; var pr = camProject(S.a[0], S.a[1], S.a[2]); S.scr = pr; S.mul = pr.visible ? pr.scale / S.restScale : 0; }
     function rectOf(S) { if (!S.scr.visible) return { x: OFF.x, y: OFF.y, w: 0, h: 0 }; var w = S.rw * S.mul, h = S.rh * S.mul; return { x: S.scr.sx - w / 2, y: S.scr.sy - h / 2, w: w, h: h }; }
     L.porthole = rectOf(STA.window);
@@ -156,8 +153,12 @@
   function cineSkip() { if (!G.cine || !G.cine.skip) return; var f = G.cine.onEnd; G.cine = null; if (f) f(); }
   function press(id) { UI.pressed[id] = G.time; }
   function btnDepth(id) { var t0 = UI.pressed[id]; if (t0 == null) return 4; return 4 * clamp((G.time - t0) / 0.12, 0, 1); }
-  function triggerReveal() { if (G.mutSeen) return; G.mutSeen = true; G.reveal = { t0: G.time, until: G.time + 3.4 };
-    G.glitch = Math.max(G.glitch, 0.5); G.sanity = clamp(G.sanity - 0.06, 0, 1); radioQueueAll(RADIO.reveal); Audio.setMusic("threat"); }
+  function toggleView() { // swap between the RADAR (navigate) and the WINDOW (look out for leaks) — fixed camera
+    if (G.scene !== "dive" || G.detonate || G.descentFx) return; press("light"); Audio.init();
+    G.view = (G.view === "radar") ? "window" : "radar"; G.lightOn = (G.view === "window"); // floodlight on at the glass
+    if (G.view === "window") { radioTutorial("lookOut"); if (Audio.vent) Audio.vent(); } else { if (Audio.card) Audio.card(); }
+    clearDirs(); G.confirmDir = null;
+  }
 
   // ---- the intro cutscene: storm rig -> lower DN-7 -> cut cable -> plunge into the trench ----
   function beginIntro() { G.scene = "intro"; if (Audio.init) Audio.init(); if (Audio.setMusic) Audio.setMusic("ambient"); radioInit(); G._introPlayed = true;
@@ -215,47 +216,24 @@
     if (iT < 3.0) { ctx.save(); ctx.globalAlpha = clamp(1 - iT / 3, 0, 1) * Art.bootFlicker(iT + 0.3, 1.0);
       Art.text(ctx, "ПРОЕКТ «ДРЕДНОУТ»", W / 2, bar + clamp(H * 0.07, 26, 54), clamp(W * 0.03, 16, 30), PAL.amberHi, "center");
       Art.text(ctx, "СЕВ. ФЛОТ · 1986 · −5200 М", W / 2, bar + clamp(H * 0.07, 26, 54) + clamp(W * 0.022, 12, 22), clamp(W * 0.016, 10, 16), PAL.amber, "center"); ctx.restore(); }
-    drawRadioPanel();
+    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, flash: G.flash, flashCol: G.flashCol, time: G.time, glitch: G.glitch + pl * 0.3, pixel: 2.4 + pl * 1.6 });
+    drawRadioPanel();   // crisp comms + skip control over the pixelated cutscene
     UI.skipBtn = { x: W - clamp(W * 0.18, 120, 180) - 14, y: H - bar - clamp(H * 0.07, 40, 58) - 10, w: clamp(W * 0.18, 120, 180), h: clamp(H * 0.07, 40, 58) };
     Art.button(ctx, UI.skipBtn, "SKIP ▸", { hover: UI.hover === "skip", depth: 3 });
-    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, flash: G.flash, flashCol: G.flashCol, time: G.time, glitch: G.glitch + pl * 0.3, pixel: 2 + pl * 1.6 });
   }
   function drawDescentFx() { var k = clamp(G.descentFx.t / G.descentFx.dur, 0, 1), e = easeInOut(k);
     ctx.fillStyle = "rgba(2,7,11," + (0.55 + e * 0.4).toFixed(2) + ")"; ctx.fillRect(0, 0, W, H);
     ctx.save(); for (var i = 0; i < 70; i++) { var sd = i * 0.173, by = H - ((G.time * 600 + i * 97) % (H * 1.4)), bx = W * ((sd * 7) % 1), sz = 1 + (i % 3); ctx.fillStyle = "rgba(190,220,225," + (0.10 + 0.3 * Math.sin(k * Math.PI)).toFixed(2) + ")"; ctx.fillRect(bx, by, sz, sz * 2.4); } ctx.restore();
     ctx.globalAlpha = Math.sin(k * Math.PI); Art.text(ctx, "↓ " + Math.floor(G.depth) + " М ↓", W / 2, H * 0.5, clamp(W * 0.04, 18, 40), PAL.bioHi, "center"); ctx.globalAlpha = 1; }
-  function renderReveal() { var rv = G.reveal, dur = rv.until - rv.t0, k = clamp((G.time - rv.t0) / dur, 0, 1);
-    ctx.fillStyle = "#020608"; ctx.fillRect(0, 0, W, H);
-    var ease = k < 0.15 ? (k / 0.15) : 1, fade = k > 0.85 ? (1 - (k - 0.85) / 0.15) : 1;
-    // a faint cone of light from the sub so the mass has something to eclipse as it crosses
-    var bg = ctx.createRadialGradient(W / 2, H * 0.42, 4, W / 2, H * 0.55, Math.max(W, H) * 0.6);
-    bg.addColorStop(0, "rgba(16,40,46,0.5)"); bg.addColorStop(1, "rgba(2,6,8,0)"); ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
-    // something IMMENSE crosses the deep, eclipsing it — a discrete looming mass, never resolved, never a model
-    var fr = Math.max(W, H) * (0.42 + k * 0.22), fx = W * (1.35 - k * 0.85), fy = H * (0.5 + Math.sin(k * 2) * 0.05);
-    ctx.save(); ctx.globalAlpha = ease * fade; Art.drawShadowMass(ctx, fx, fy, fr, { t: G.time, lit: 0.45, elong: 1.6 }); ctx.restore();
-    // pressure on the glass — a faint flexing rim + a sick red vignette
-    var vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.22, W / 2, H / 2, Math.max(W, H) * 0.72); vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(70,14,20," + (0.22 * fade).toFixed(2) + ")"); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
-    if (G.time > rv.until) G.reveal = null; }
-  function updateCamera(s) { // critically-damped look spring (no overshoot -> no nausea) + auto-return home
-    var c = G.cam, KY = 0.62, KU = 0.34, KD = 0.40;
-    c.tgtYaw = clamp(c.tgtYaw, -KY, KY); c.tgtPitch = clamp(c.tgtPitch, -KU, KD);
-    var k = 120, cd = 21.9;
-    c.vYaw += (k * (c.tgtYaw - c.yaw) - cd * c.vYaw) * s; c.yaw += c.vYaw * s;
-    c.vPitch += (k * (c.tgtPitch - c.pitch) - cd * c.vPitch) * s; c.pitch += c.vPitch * s;
-    c.active = Math.max(0, c.active - s * 1.5); c.idle += s * 0.55;
-    if (c.active < 0.05) { var e = Math.min(1, s * 1.8 * (G.leak > 0.5 ? 0.55 : 1)); c.tgtYaw += (0 - c.tgtYaw) * e; c.tgtPitch += (0 - c.tgtPitch) * e; }
-  }
-  function spawnPassby(fast) { // a creature drifting across the window glass
-    var shape = "angler";
-    for (var i = 0; i < G.cells.length; i++) { var cc = G.cells[i]; if (cc.mon && !cc.triggered && Math.abs(cc.x - G.sub.cx) + Math.abs(cc.y - G.sub.cy) <= 3 && MON[cc.monId] && MON[cc.monId].shape === "mutationKing") { shape = "mutationKing"; break; } }
-    G.passby = { shape: shape, side: G.rng.chance(0.5) ? 1 : -1, depth: G.rng.range(3.6, 6), y: G.rng.range(-0.25, 0.3), t: 0, dur: fast ? G.rng.range(1.0, 1.4) : G.rng.range(2.2, 2.8), fast: !!fast };
-  }
-  function updatePassby(s) { // sneaky, rare when safe, more frequent when hunted; one at a time
-    if (G.passby) { G.passby.t += s; if (G.passby.t >= G.passby.dur) G.passby = null; return; }
-    G.passT -= s; if (G.passT > 0) return;
-    var nd = nearestMonDist(), danger = clamp((G.threat / 100) * 0.6 + (nd <= 3 ? (4 - nd) / 4 * 0.8 : 0) + (1 - G.sanity) * 0.5, 0, 1);
-    if (G.rng.chance(danger * 0.8)) spawnPassby(false); // low sanity -> more phantom contacts at the glass
-    G.passT = G.rng.range(2.6, 6.5) - danger * 3;
+  function updateCamera(s) { var c = G.cam; c.yaw = c.pitch = c.vYaw = c.vPitch = c.tgtYaw = c.tgtPitch = 0; } // FIXED forward
+  // ---- PRESSURE: spring a leak somewhere on the hull. Located ONLY by looking out the window. ----
+  function depthFrac() { return clamp(G.depth / 5200, 0, 1); }
+  function spawnLeak() {
+    var side = G.rng.chance(0.5) ? 1 : -1;
+    G.leaks.push({ x: 0.18 + G.rng.range(0, 0.64), y: 0.22 + G.rng.range(0, 0.5), born: G.time, side: side, sev: G.rng.range(0.8, 1.2) });
+    G.lamp.hull = 1; Audio.alert(); if (Audio.groan) Audio.groan();
+    G.flash = Math.max(G.flash, 0.16); G.flashCol = "120,160,170"; if (OPT.shake) G.shake = Math.max(G.shake, 4);
+    radioTutorial("firstLeak"); radioAmbient("leak", 0.6, 1);
   }
 
   // ---------------- state ----------------
@@ -265,17 +243,19 @@
     G = { scene: "titlemenu", seedStr: rng.seedStr, rng: rng, time: 0,
       layer: 1, gw: 7, gh: 7, cells: [], sub: { cx: 0, cy: 0 }, facing: { dx: 0, dy: 1 },
       hull: CFG.startHull, oxygen: CFG.startOxygen, pings: CFG.pingsStart, threat: 0, depth: 0,
-      patches: CFG.startPatches, onLoot: false,
+      patches: 0, onLoot: false,
       lightOn: false, transit: null, stalker: null, woke: false, confirmDir: null,
       leak: 0, scare: null, snow: [], flash: 0, flashCol: "180,40,40", shake: 0, hbT: 0, heartbeat: 0,
       lamp: { o2: 0, hull: 0, wake: 0 }, endKind: null, won: false, menuSel: 0, padActive: false,
       hatch: { x: 0, y: 0 }, start: { x: 0, y: 0 }, loreSeen: [], pingFlash: 0, sweep: 0,
       // full-horror state: sanity ("the dark notices you"), CRT glitch pulse, the radio, idle clock
       sanity: 1, glitch: 0, radio: null, idleT: 0, srcSaid: false, flare: 0,
-      cine: null, descentFx: null, mutSeen: false, reveal: null, hands: { lx: 0, ly: 0, rx: 0, ry: 0, lR: 0, rR: 0 },
-      // look-around camera (eased yaw/pitch); shake is NEVER written here (kept transient in render)
+      cine: null, descentFx: null, detonate: null, hands: { lx: 0, ly: 0, rx: 0, ry: 0, lR: 0, rR: 0, grip: 0 },
+      // FIXED camera now: angles stay 0, no look-around. Kept as an object so old call sites are harmless.
       cam: { yaw: 0, pitch: 0, vYaw: 0, vPitch: 0, tgtYaw: 0, tgtPitch: 0, idle: 0, active: 0, lastLook: -9, _swayY: 0, _swayP: 0 },
-      passby: null, passT: 4, valveAngle: 0, valveSpin: 0, leakStep: 0 };
+      valveAngle: 0, valveSpin: 0, leakStep: 0,
+      // SURVIVAL: which fixed view you're in, the crushing pressure, and the leaks it springs
+      view: "radar", pressure: 0, leaks: [], leakT: CFG.leakIntervalBase, flood: 0 };
     radioInit();
   }
   function fmt(t, o) { return String(t).replace(/\{(\w+)\}/g, function (m, key) { return o && o[key] != null ? o[key] : ""; }); }
@@ -324,18 +304,13 @@
       var st = rng.pick(opts); px = clamp(px + st[0], 0, G.gw - 1); py = clamp(py + st[1], 0, G.gh - 1); mark(px, py);
     }
     mark(hx, hy);
-    // monsters on non-safe cells
+    // MINES on non-safe cells (single-cell; numbers count them; the carved corridor stays clear)
     var free = []; for (var c = 0; c < G.cells.length; c++) if (!safe[c]) free.push(G.cells[c]);
     rng.shuffle(free);
-    var mc = Math.min(Lc.monsters, free.length);
+    var mc = Math.min(Lc.mines, free.length);
     for (var m = 0; m < mc; m++) { var mm = free[m]; mm.mon = true; mm.monId = rng.pick(Lc.pool); }
     // hatch / source
     var hatchC = cell(hx, hy); hatchC.hatch = true; if (Lc.source) { hatchC.source = true; hatchC.kind = "source"; }
-    // loot + vents on remaining non-monster, non-hatch, non-start cells
-    var open = []; for (var d = 0; d < G.cells.length; d++) { var cc = G.cells[d]; if (!cc.mon && !cc.hatch && !(cc.x === sx && cc.y === sy)) open.push(cc); }
-    rng.shuffle(open); var oi = 0;
-    for (var v = 0; v < (Lc.vents || 0) && oi < open.length; v++, oi++) { open[oi].lootId = "vent"; open[oi].kind = "vent"; open[oi].o2 = LOOT.vent.o2; }
-    for (var lt = 0; lt < (Lc.loot || 0) && oi < open.length; lt++, oi++) { var lk = rng.pick(Lc.lootPool); open[oi].lootId = lk; open[oi].kind = LOOT[lk].kind; open[oi].value = LOOT[lk].value ? rng.int(LOOT[lk].value[0], LOOT[lk].value[1]) : 0; }
     // numbers
     for (var y2 = 0; y2 < G.gh; y2++) for (var x2 = 0; x2 < G.gw; x2++) { var t = cell(x2, y2); if (t.mon) continue; var cnt = 0; for (var ny = -1; ny <= 1; ny++) for (var nx = -1; nx <= 1; nx++) { if (!nx && !ny) continue; var nb = cell(x2 + nx, y2 + ny); if (nb && nb.mon) cnt++; } t.n = cnt; }
     // reveal start (it is a 0 — flood its pocket)
@@ -356,35 +331,14 @@
   function nearestMonDist() { var best = 99; for (var i = 0; i < G.cells.length; i++) { var c = G.cells[i]; if (c.mon && !c.triggered) { var d = Math.abs(c.x - G.sub.cx) + Math.abs(c.y - G.sub.cy); if (d < best) best = d; } } return best; }
   // THE TWIST: the Angler moves. It slips to an adjacent FOG cell, clearing the flag you set on its
   // old tile (your mark is now a lie) and re-arming an unmarked one. Numbers shift; a solved board lies.
-  function moveAnglers() {
-    var chance = Math.min(0.5, (G.threat >= CFG.wake ? 0.4 : 0.1) + (G.layer - 1) * 0.04);
-    var moved = false, dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-    for (var i = 0; i < G.cells.length; i++) {
-      var c = G.cells[i]; if (!c.mon || c.triggered) continue; if (!G.rng.chance(chance)) continue;
-      var cands = [];
-      for (var d = 0; d < 4; d++) { var nx = c.x + dirs[d][0], ny = c.y + dirs[d][1], tc = cell(nx, ny);
-        if (!tc || tc.mon || tc.seen || tc.hatch || tc.source) continue;
-        if (nx === G.sub.cx && ny === G.sub.cy) continue; // never slide onto the sub (no free kill)
-        cands.push(tc); }
-      if (!cands.length) continue;
-      var dest = G.rng.pick(cands);
-      c.mon = false; var mid = c.monId; c.monId = null; c.flagged = false; // the mark on the old tile is cleared — it lied
-      dest.mon = true; dest.monId = mid; dest.flagged = false;
-      moved = true;
-    }
-    if (moved) { recomputeNumbers(); G.lamp.wake = Math.max(G.lamp.wake, 0.7); Audio.alert(); G.flash = Math.max(G.flash, 0.16); G.flashCol = "120,40,160";
-      if (OPT.shake) G.shake = Math.max(G.shake, 4.5); // the creatures shifting thumps the hull
-      var nd = nearestMonDist();
-      if (!G.passby && nd <= 3) spawnPassby(true); // and one darts past the glass
-      radioTutorial("firstMove"); radioAmbient(nd === 1 ? "nearMiss" : "move", nd === 1 ? 0.4 : 0.25, 2); }
-    return moved;
-  }
+  function moveAnglers() { return false; } // mines are STATIC now (no twist) — kept as a no-op for the export/tests
 
-  function startRun() { G.layer = 1; G.hull = effMaxHull(); G.oxygen = effMaxOxygen(); G.threat = 0; G.lightOn = false; G.flare = 0; G.leak = 0; G.leakStep = 0; G.scare = null; G.won = false; G.endKind = null;
-    G.sanity = 1; G.glitch = 0; G.idleT = 0; G.srcSaid = false; G.patches = CFG.startPatches; G.loreSeen = [];
-    G.passby = null; G.passT = 4; G.valveAngle = 0; G.valveSpin = 0;
-    G.cam.yaw = G.cam.pitch = G.cam.vYaw = G.cam.vPitch = G.cam.tgtYaw = G.cam.tgtPitch = 0; G.cam.active = 0; // each dive starts facing the window
-    G.mutSeen = false; G.reveal = null; G._revealPending = false; G.descentFx = null; G.cine = null;
+  function startRun() { G.layer = 1; G.hull = effMaxHull(); G.oxygen = effMaxOxygen(); G.threat = 0; G.lightOn = false; G.flare = 0; G.leak = 0; G.leakStep = 0; G.detonate = null; G.won = false; G.endKind = null;
+    G.sanity = 1; G.glitch = 0; G.idleT = 0; G.srcSaid = false; G.loreSeen = [];
+    G.valveAngle = 0; G.valveSpin = 0;
+    G.view = "radar"; G.pressure = 0; G.leaks = []; G.leakT = CFG.leakIntervalBase; G.flood = 0;
+    G.cam.yaw = G.cam.pitch = G.cam.vYaw = G.cam.vPitch = G.cam.tgtYaw = G.cam.tgtPitch = 0; G.cam.active = 0;
+    G.descentFx = null; G.cine = null;
     radioInit(); genLayer(1); G.scene = "dive"; Audio.setMusic("ambient");
     // after the intro cutscene, only play the un-heard half of the briefing; a cold retry plays it all
     if (G._introPlayed) { G._introPlayed = false; radioQueueAll(RADIO.briefing.slice(0, 5)); } else radioQueueAll(RADIO.briefing);
@@ -393,112 +347,76 @@
     radioTutorial("firstCrank"); radioQueue(RADIO.seal); G.flash = Math.max(G.flash, 0.4); G.flashCol = "120,160,170";
     G.descentFx = { t: 0, dur: 1.15 }; // a brief plunge transition
     genLayer(nl); G.threat = clamp(G.threat - 20, 0, 100); G.sanity = clamp(G.sanity + 0.08, 0, 1); G.srcSaid = false;
-    radioQueueAll(RADIO.layer[nl] || RADIO.layer[CFG.layers]);
-    if (nl >= 3 && !G.mutSeen) triggerReveal(); } // the lost crew, glimpsed, by the third layer
+    G.view = "radar"; G.leaks = []; G.flood = 0; G.leakT = lerp(CFG.leakIntervalBase, CFG.leakIntervalMin, depthFrac()) * 0.8; // deeper -> leaks come sooner
+    radioQueueAll(RADIO.layer[nl] || RADIO.layer[CFG.layers]); }
   function winRun() { G.scene = "end"; G.won = true; G.endKind = "win"; Audio.setMusic("none"); Audio.win(); radioQueue(RADIO.win); }
   function die(kind) { if (G.scene !== "dive") return; G.scene = "end"; G.won = false; G.endKind = kind; Audio.setMusic("none"); Audio.lose();
-    if (kind === "hull") radioQueue(RADIO.deathHull); else radioQueueAll(RADIO.deathAir); }
+    if (kind === "hull") radioQueue(RADIO.deathHull); else if (kind === "mine") radioQueue(RADIO.deathMine); else radioQueueAll(RADIO.deathAir); }
 
   // ---------------- actions ----------------
   function tryDrive(dx, dy) {
-    if (G.scene !== "dive" || G.transit || G.scare || G.lock || G.reveal || G.descentFx) return; Audio.init();
+    if (G.scene !== "dive" || G.view !== "radar" || G.transit || G.detonate || G.descentFx) return; Audio.init();
     press(dy < 0 ? "up" : dy > 0 ? "down" : dx < 0 ? "left" : "right");
     var tx = G.sub.cx + dx, ty = G.sub.cy + dy, c = cell(tx, ty); if (!c) return;
     G.facing = { dx: dx, dy: dy };
-    if (c.flagged && !c.triggered) {
+    if (c.flagged && !c.triggered) {   // flagged cell: demand a confirming second press (the only guard against fatal slips)
       if (G.confirmDir && G.confirmDir.dx === dx && G.confirmDir.dy === dy) { G.confirmDir = null; }
-      else { G.confirmDir = { dx: dx, dy: dy }; G.lamp.hull = 0.6; Audio.alert(); return; }
+      else { G.confirmDir = { dx: dx, dy: dy, t: G.time }; G.lamp.hull = 0.6; Audio.alert(); return; }
     } else G.confirmDir = null;
-    G.transit = { dx: dx, dy: dy, target: c, t: 0, isMonster: !!c.mon, shape: c.mon ? MON[c.monId].shape : null, fromX: G.sub.cx, fromY: G.sub.cy };
+    G.transit = { dx: dx, dy: dy, target: c, t: 0, isMine: !!c.mon, fromX: G.sub.cx, fromY: G.sub.cy };
   }
   function resolveArrive(tr) {
     var c = tr.target; G.transit = null; G.oxygen -= CFG.moveCost;
-    if (c.mon) { strike(c); afterMove(); return; }
+    if (c.mon) { G.sub = { cx: c.x, cy: c.y }; detonate(c); return; }   // a MINE — instant death after the blast
     G.sub = { cx: c.x, cy: c.y };
     seeCell(c);
     radioTutorial("firstDrive"); if (c.n > 0) radioTutorial("firstNumber");
-    if (c.lootId && !c.collected && c.kind === "vent") collect(c);       // thermal air is automatic
-    G.onLoot = !!(c.lootId && !c.collected && c.kind !== "vent");        // signals await SECURE
-    if (G.onLoot) radioTutorial("onSignal");
     afterMove();
   }
   function afterMove() {
     G.idleT = 0;
     G.threat = clamp(G.threat + CFG.threatMove, 0, 100);
-    moveAnglers();
     if (G.oxygen <= 0) { G.oxygen = 0; return die("oxygen"); }
     if (G.hull <= 0) return die("hull");
   }
-  function collect(c) { // c is a vent (auto) or a secured signal — both now vent AIR (no money)
-    c.collected = true;
-    var air = (LOOT[c.lootId] && LOOT[c.lootId].o2) || c.o2 || 34;
-    G.oxygen = clamp(G.oxygen + air, 0, effMaxOxygen() + 40); G.lamp.o2 = 0;
-    if (c.kind === "vent") { Audio.vent(); G.flash = 0.2; G.flashCol = "40,240,170"; }
-    else { Audio.good(); G.flash = 0.28; G.flashCol = "224,163,46"; G.sanity = clamp(G.sanity + 0.06, 0, 1); }
-  }
-  // SECURE: start the radar mini-game to lock a signal that a warship is jamming
-  function secure() {
-    if (G.scene !== "dive" || G.transit || G.scare || G.lock || G.reveal || G.descentFx) return; press("excavate"); var c = curCell();
-    if (!c || !c.lootId || c.collected || c.kind === "vent") return;
-    var def = LOOT[c.lootId];
-    G.lock = { cx: c.x, cy: c.y, val: c.value, need: def.need || 2, hits: 0, ang: G.rng.range(0, Math.PI * 2), spd: 1.7 + (def.need || 2) * 0.32, dir: G.rng.chance(0.5) ? 1 : -1, until: G.time + 9.5 };
-    Audio.scan();
-  }
-  function angDiff(a, b) { var d = (a - b) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; }
-  function lockAttempt() { // press when the drifting signal crosses the capture window at the top of the dial
-    if (!G.lock) return; var lk = G.lock;
-    var diff = Math.abs(angDiff(lk.ang, -Math.PI / 2));
-    var w = Math.max(0.22, 0.55 - lk.hits * 0.05); // capture window shrinks as you close in
-    if (diff <= w) { lk.hits++; lk.spd += 0.55; if (G.rng.chance(0.5)) lk.dir *= -1; Audio.ping(); G.flash = 0.12; G.flashCol = "70,240,200";
-      if (lk.hits >= lk.need) lockSuccess(); }
-    else { lk.spd += 0.22; G.threat = clamp(G.threat + 5, 0, 100); Audio.alert(); }
-  }
-  function lockSuccess() { var c = cell(G.lock.cx, G.lock.cy); if (c) collect(c); radioSignal(); G.onLoot = false; G.threat = clamp(G.threat + 8, 0, 100); G.lock = null; }
-  function lockFail() { G.lock = null; G.threat = clamp(G.threat + 22, 0, 100); G.lamp.wake = 1; Audio.alert(); moveAnglers(); }
-  function patch() { // hands-on leak repair
-    if (G.scene !== "dive" || G.transit || G.lock || G.scare || G.reveal || G.descentFx) return; press("patch");
-    if (G.patches <= 0) { G.lamp.hull = 0.4; return; }
-    if (G.hull >= effMaxHull()) return;
-    G.patches--; G.hull = clamp(G.hull + CFG.patchAmount, 0, effMaxHull());
-    G.leak = (1 - G.hull / effMaxHull()) * bilgeMult();
-    Audio.vent(); G.flash = 0.2; G.flashCol = "40,240,170";
+  // PATCH: seal the leak you located by LOOKING OUT — only works at the glass; free, but the cost is the air you burn there
+  function patch() {
+    if (G.scene !== "dive" || G.transit || G.detonate || G.descentFx) return; press("patch");
+    if (G.view !== "window") { radioTutorial("lookOut"); G.lamp.hull = 0.4; return; }   // must be at the window to find it
+    if (!G.leaks.length) { G.lamp.hull = 0.3; return; }
+    var idx = 0, worst = -1; for (var i = 0; i < G.leaks.length; i++) { var age = G.time - G.leaks[i].born; if (age > worst) { worst = age; idx = i; } }
+    G.leaks.splice(idx, 1); G.hands.grip = 1;                                   // seal the oldest seam
+    G.hull = clamp(G.hull + 16, 0, effMaxHull());                               // the patch holds back a little water
+    Audio.vent(); G.flash = 0.18; G.flashCol = "40,240,170"; if (OPT.shake) G.shake = Math.max(G.shake, 2);
   }
   function crank() { // the winch: breach on the Source, descend on the hatch — NEVER surfaces (no way back)
-    if (G.scene !== "dive" || G.transit || G.scare || G.reveal || G.descentFx) return; var c = curCell();
-    if (G.lock) return;
+    if (G.scene !== "dive" || G.view !== "radar" || G.transit || G.detonate || G.descentFx) return; var c = curCell();
     press("crank");
     if (c && c.source) { G.valveSpin = 9; winRun(); return; }
     if (c && c.hatch) { G.valveSpin = 9; descend(); return; }
     G.valveSpin = -7; Audio.alert(); radioQueue(RADIO.noway); // denied — there is no surface to return to
   }
-  function strike(c) {
-    var def = MON[c.monId], dmg = G.rng.int(def.dmg[0], def.dmg[1]);
-    G.hull = clamp(G.hull - dmg, 0, CFG.maxHull);
-    c.seen = true; c.triggered = true; c.flagged = true; // sub is shoved back; the cell is now KNOWN + flagged
-    G.flash = 0.8; G.flashCol = "190,30,30"; if (OPT.shake) G.shake = def.tier >= 3 ? 16 : 11;
-    G.lamp.hull = 1; Audio.roar(); Audio.damage();
-    G.glitch = 0.9; G.sanity = clamp(G.sanity - 0.12, 0, 1); // the strike tears the tube and the mind
-    G.scare = { shape: def.shape, name: def.name, until: G.time + (def.tier >= 3 ? 1.6 : 1.1), t0: G.time, tier: def.tier };
-    if (!G.mutSeen) G._revealPending = true; // first contact -> the uncanny reveal cutscene after the scare
-    clearDirs(); // consume held movement so the sub doesn't auto-step when the scare clears
-    Audio.setMusic("threat");
+  // a MINE detonates: white blast + hull rupture, then death. No creature — pure ordnance and pressure.
+  function detonate(c) {
+    c.seen = true; c.triggered = true; c.flagged = true;
+    G.flash = 1; G.flashCol = "255,214,150"; if (OPT.shake) G.shake = 28;
+    G.glitch = 1; G.lamp.hull = 1; Audio.damage(); if (Audio.roar) Audio.roar();
+    for (var i = 0; i < G.cells.length; i++) if (G.cells[i].mon) G.cells[i].seen = true; // the scope reveals every mine you skirted
+    G.detonate = { t0: G.time, until: G.time + 1.25, cx: c.x, cy: c.y };
+    clearDirs(); Audio.setMusic("none");
   }
   function ping() {
-    if (G.scene !== "dive" || G.transit || G.scare || G.lock || G.reveal || G.descentFx || G.pings <= 0) { if (G.pings <= 0) G.lamp.o2 = 0.4; return; }
+    if (G.scene !== "dive" || G.view !== "radar" || G.transit || G.detonate || G.descentFx || G.pings <= 0) { if (G.pings <= 0) G.lamp.o2 = 0.4; return; }
     Audio.init(); press("ping"); G.pings--; G.pingFlash = 1; G.sweep = 0; G.threat = clamp(G.threat + CFG.threatPing, 0, 100);
     var fx = G.facing.dx, fy = G.facing.dy;
     for (var d = 1; d <= CFG.pingCone; d++) { for (var l = -(d - 1); l <= d - 1; l++) {
       var cx = G.sub.cx + fx * d - fy * l, cy = G.sub.cy + fy * d + fx * l; var c = cell(cx, cy);
-      if (c && !c.mon && !c.seen) seeCell(c); // ping reveals numbers of SAFE cells only; monsters stay fog (deduce them)
+      if (c && !c.mon && !c.seen) seeCell(c); // ping reveals numbers of SAFE cells only; mines stay dark (deduce them)
     } }
     Audio.ping(); radioTutorial("firstPing");
-    if (G.threat >= CFG.wake) moveAnglers(); // a loud ping makes the Anglers shift
   }
-  // FLASH: a single quick flare of the floodlight — a brief glimpse of the dark, then it's gone. Bright = noticed.
-  function doFlash() { if (G.scene !== "dive" || G.lock || G.reveal || G.descentFx) return; press("light"); Audio.init();
-    G.flare = 1; G.pingFlash = Math.max(G.pingFlash, 0.6); G.threat = clamp(G.threat + CFG.threatLight * 3, 0, 100); Audio.vent(); }
-  var toggleLight = doFlash; // keep the old name for the key/pad/touch bindings
-  function flagFaced() { if (G.scene !== "dive" || G.transit || G.lock) return; var c = cell(G.sub.cx + G.facing.dx, G.sub.cy + G.facing.dy); flagCell(c); }
+  var toggleLight = toggleView; // legacy name for the key/pad/touch bindings — now toggles RADAR <-> WINDOW
+  function flagFaced() { if (G.scene !== "dive" || G.view !== "radar" || G.transit) return; var c = cell(G.sub.cx + G.facing.dx, G.sub.cy + G.facing.dy); flagCell(c); }
   function flagCell(c) { if (!c || c.seen) return; c.flagged = !c.flagged; G.confirmDir = null; Audio.card(); if (c.flagged) radioTutorial("firstFlag"); }
 
   // (the old "stalker" hunter is replaced by moveAnglers(): the mines themselves relocate.)
@@ -513,44 +431,50 @@
     if (G.glitch > 0) { G.glitch -= s * 4; if (G.glitch < 0) G.glitch = 0; } // CRT tear decays
     G.sweep = (G.sweep + s * 2.2) % (Math.PI * 2);
     for (var key in G.lamp) if (G.lamp[key] > 0) G.lamp[key] = Math.max(0, G.lamp[key] - s * 0.4);
-    if (G.scare && G.time > G.scare.until) { G.scare = null; if (G._revealPending) { G._revealPending = false; triggerReveal(); } }
+    if (G.detonate && G.time > G.detonate.until) { G.detonate = null; die("mine"); return; } // the blast finishes -> death
     // snow drift (gentle when idle, rush during transit)
     var rush = G.transit ? 14 : 1.5;
     for (var i = 0; i < G.snow.length; i++) { var p = G.snow[i]; p.rz -= rush * s; if (p.rz < 0.5) { var ns = newSnow(false); p.rx = ns.rx; p.ry = ns.ry; p.rz = ns.rz; } }
     if (G.scene === "intro") { updateIntro(s); return; }
     if (G.scene !== "dive") return;
-    updateCamera(s); // look-around spring runs every dive frame (incl. lock + scare) so the view never freezes
+    updateCamera(s); // FIXED view (no look-around)
     if (G.descentFx) { G.descentFx.t += s; if (G.descentFx.t >= G.descentFx.dur) G.descentFx = null; }
-    if (G.flare > 0) G.flare = Math.max(0, G.flare - s * 0.7); G.lightOn = G.flare > 0.12; // the flash decays; light is only ever a brief glimpse
+    G.lightOn = (G.view === "window"); // the floodlight is on only when you're at the glass looking out
+    if (G.hands.grip > 0) G.hands.grip = Math.max(0, G.hands.grip - s * 2.2); // patch-grip relaxes
+    if (G.detonate) return; // the blast plays out; the sim is frozen until death
     G.valveAngle += G.valveSpin * s; G.valveSpin += (0 - G.valveSpin) * Math.min(1, s * 4);
+    if (G.confirmDir && G.time - (G.confirmDir.t || 0) > 1.5) G.confirmDir = null; // a stale "confirm" must not carry into a later slip
 
     if (G.transit) { G.transit.t += s / CFG.moveGlide; if (G.transit.t >= 1) resolveArrive(G.transit); }
     else pumpHeldDrive();   // held WSAD/d-pad keeps driving cell-to-cell once the glide lands (steady 0.34s cadence)
 
-    if (G.lock) { var lk = G.lock; lk.ang = (lk.ang + lk.spd * lk.dir * s) % (Math.PI * 2);
-      G.oxygen -= CFG.idleDrain * s * 1.6; G.threat = clamp(G.threat + 4 * s, 0, 100); // broadcasting burns air + screams into the dark
-      if (G.time > lk.until) lockFail();
-      if (G.oxygen <= 0) { G.oxygen = 0; G.lock = null; return die("oxygen"); }
-      return; // the lock has focus — pause the normal dive sim
-    }
-
-    // air clock
-    G.oxygen -= CFG.idleDrain * s; if (G.oxygen <= 0) { G.oxygen = 0; return die("oxygen"); }
+    // air clock — the crush makes you breathe harder the deeper you are; nothing ever refills it
+    var pf = depthFrac();
+    G.oxygen -= (CFG.idleDrain + CFG.pressureAirBoost * pf) * s; if (G.oxygen <= 0) { G.oxygen = 0; return die("oxygen"); }
     if (G.oxygen < effMaxOxygen() * 0.2) G.lamp.o2 = Math.max(G.lamp.o2, 0.5 + 0.5 * Math.sin(G.time * 5));
-    // threat
-    var add = 0; if (G.lightOn) add += lightThreatRate() * s;
+    // threat / noise (feeds ambient + tightens the leak cadence; no longer wakes a creature)
+    var add = 0; if (G.view === "window") add += lightThreatRate() * s * 0.5;
     G.threat = clamp(G.threat + add - CFG.threatDecay * s, 0, 100);
-    if (G.threat >= CFG.wake) G.lamp.wake = Math.max(G.lamp.wake, 0.5);
-    // smooth leak severity toward hull damage (bilge pump keeps the cabin drier)
-    var target = (1 - G.hull / effMaxHull()) * bilgeMult(); G.leak += (target - G.leak) * Math.min(1, s * 2);
-    updatePassby(s); // sneaky creatures drift past the window
-    // a new seam bursts as the cabin floods deeper — a thump + a cold flash
+    G.pressure += (pf - G.pressure) * Math.min(1, s * 0.6);
+    // ---- PRESSURE springs LEAKS on a timer that tightens with depth + noise ----
+    G.leakT -= s;
+    if (G.leakT <= 0 && G.leaks.length < (2 + Math.round(pf * 2))) {
+      spawnLeak();
+      var iv = lerp(CFG.leakIntervalBase, CFG.leakIntervalMin, pf) - (G.threat >= CFG.wake ? 3 : 0);
+      G.leakT = Math.max(CFG.leakIntervalMin, iv) * G.rng.range(0.8, 1.25);
+    }
+    // unpatched leaks flood the hull; an old seam BURSTS and floods twice as fast
+    var floodRate = 0;
+    for (var li = 0; li < G.leaks.length; li++) { var lk = G.leaks[li]; var burst = (G.time - lk.born) > CFG.leakBurst; floodRate += CFG.leakFlood * lk.sev * (burst ? 2 : 1); }
+    if (floodRate > 0) { G.hull = clamp(G.hull - floodRate * s, 0, effMaxHull()); if (G.hull <= 0) return die("hull"); }
+    // the visible flood level eases toward the hull damage (drives the cabin-flooding overlay + seam audio)
+    var target = (1 - G.hull / effMaxHull()); G.leak += (target - G.leak) * Math.min(1, s * 2);
     var lstep = Math.floor(G.leak * 10); if (lstep > G.leakStep) { if (OPT.shake) G.shake = Math.max(G.shake, 3); G.flash = Math.max(G.flash, 0.18); G.flashCol = "120,160,170"; } G.leakStep = lstep;
-    // heartbeat from a nearby (unrevealed) Angler / low hull / low air
-    var nd = nearestMonDist(); var hbScare = nd <= 3 ? clamp(1 - (nd - 1) / 3, 0, 1) : 0;
-    G.heartbeat = Math.max(hbScare, G.leak > 0.7 ? G.leak : 0, G.oxygen < effMaxOxygen() * 0.12 ? 0.6 : 0);
-    if (G.heartbeat > 0.06) { var iv = 1.1 - G.heartbeat * 0.7; G.hbT -= s; if (G.hbT <= 0) { G.hbT = iv; Audio.heartbeat(G.heartbeat); } } else G.hbT = 0;
-    // RADIO cadence: layer-1 tutorial beats, threat warnings, the deep-idle whispers
+    // heartbeat from a nearby (unrevealed) mine / heavy flood / low air
+    var nd = nearestMonDist(); var hbMine = nd <= 2 ? clamp(1 - (nd - 1) / 2, 0, 1) * 0.7 : 0;
+    G.heartbeat = Math.max(hbMine, G.leak > 0.6 ? G.leak : 0, G.oxygen < effMaxOxygen() * 0.12 ? 0.6 : 0);
+    if (G.heartbeat > 0.06) { var iv2 = 1.1 - G.heartbeat * 0.7; G.hbT -= s; if (G.hbT <= 0) { G.hbT = iv2; Audio.heartbeat(G.heartbeat); } } else G.hbT = 0;
+    // RADIO cadence
     G.idleT += s;
     if (G.layer === 1) {
       if (G.idleT > 4) radioTutorial("idle");
@@ -558,18 +482,18 @@
       var hcl = cell(G.hatch.x, G.hatch.y);
       if (hcl && (hcl.seen || Math.abs(G.hatch.x - G.sub.cx) + Math.abs(G.hatch.y - G.sub.cy) === 1)) radioTutorial("foundHatch");
     }
+    if (G.leak > 0.45) radioAmbient("flood", 0.018, 1);   // (the initial leak line fires at spawn)
     if (G.threat >= CFG.wake) radioAmbient("threat", 0.30, 1);
     if (G.idleT > 12) { radioAmbient("deepIdle", 0.5, 4); G.idleT = 0; }
     // THE SOURCE speaks when you reach the floor
     var occ = curCell(); if (occ && occ.source && !G.srcSaid) { G.srcSaid = true; radioQueueAll(RADIO.source); }
-    // SANITY — "the dark notices you" (never lethal; only corrupts perception)
-    var drain = 0.004 + (!G.lightOn && G.depth > 1000 ? 0.004 : 0) + (nd <= 2 ? 0.012 : 0) + (G.oxygen < effMaxOxygen() * 0.15 ? 0.010 : 0);
+    // SANITY — the deep presses on the mind (never lethal; only corrupts perception)
+    var drain = 0.004 + (G.depth > 1000 ? 0.004 : 0) + (nd <= 2 ? 0.010 : 0) + (G.oxygen < effMaxOxygen() * 0.15 ? 0.010 : 0) + (G.leak > 0.5 ? 0.008 : 0);
     G.sanity = clamp(G.sanity - drain * s, 0, 1);
     if (G.sanity < 0.30 && G.rng.chance(0.4 * s)) { Audio.heartbeat(0.5); G.flash = Math.max(G.flash, 0.10); G.flashCol = "120,40,160"; }
     if (G.rng.chance(0.05 * s)) G.glitch = Math.max(G.glitch, 0.4); // the comms feed pops unreliably
-    // ambient groan/drip when flooding & quiet
     if (G.leak > 0.25 && Math.sin(G.time * 0.7) > 0.995) Audio.groan && Audio.groan();
-    var wantThreat = G.threat >= CFG.wake || nd <= 2 || G.leak > 0.6;
+    var wantThreat = G.leaks.length > 0 || G.hull < 40 || pf > 0.6 || G.oxygen < effMaxOxygen() * 0.2;
     if (Audio._which !== (wantThreat ? "threat" : "ambient")) Audio.setMusic(wantThreat ? "threat" : "ambient");
   }
 
@@ -589,22 +513,13 @@
     Art.drawForward(bctx, bw, bh, { contacts: forwardContacts(), snow: G.snow, lightOn: G.lightOn, threat: G.threat / 100, time: G.time, fov: 1.2, headlightRange: lightRange() });
   }
   function forwardContacts() {
-    var out = [], mons = [], sp = 6.5, tp = G.transit ? G.transit.t : 0;
+    // mines are invisible in the water (you deduce them on the scope). Only the descent hatch glows ahead.
+    var out = [], sp = 6.5, tp = G.transit ? G.transit.t : 0;
     for (var d = 1; d <= 4; d++) {
       var rz = Math.max(0.8, d * sp - tp * sp * 0.92);
-      for (var lat = -1; lat <= 1; lat++) {
-        if (lat !== 0 && d < 2) continue; // straight ahead near; widen the cone with distance
-        var tx = G.sub.cx + G.facing.dx * d - G.facing.dy * lat, ty = G.sub.cy + G.facing.dy * d + G.facing.dx * lat; var c = cell(tx, ty); if (!c) continue;
-        var rx = lat * 3.2;
-        if (c.mon && !c.triggered) mons.push({ rx: rx, ry: 0.05, rz: rz, isMonster: true, monShape: MON[c.monId].shape });
-        else if (lat === 0 && c.hatch) out.push({ rx: 0, ry: 0, rz: rz, kind: c.source ? "source" : "vent", isMonster: false });
-        else if (c.seen && c.lootId && !c.collected) out.push({ rx: rx, ry: 0, rz: rz, kind: c.kind, isMonster: false });
-      }
+      var tx = G.sub.cx + G.facing.dx * d, ty = G.sub.cy + G.facing.dy * d; var c = cell(tx, ty); if (!c) continue;
+      if (c.hatch) out.push({ rx: 0, ry: 0, rz: rz, kind: c.source ? "source" : "vent", isMonster: false });
     }
-    // cap full 3D Anglers to the nearest 2 (perf); the rest are implied by the radar/numbers
-    mons.sort(function (a, b) { return a.rz - b.rz; });
-    for (var m = 0; m < Math.min(2, mons.length); m++) out.push(mons[m]);
-    if (G.transit && G.transit.isMonster) out.push({ rx: 0, ry: 0.05, rz: Math.max(0.8, 6.5 - G.transit.t * 5.8), isMonster: true, monShape: G.transit.shape });
     return out;
   }
 
@@ -677,75 +592,107 @@
   }
   // a creature swimming PAST the window glass — sneaky, lit at centre, lost in murk at the frame edges
   // window contact is ONLY a dark silhouette lost in murk — never the creature mesh ("did I see something?")
-  function drawPassby(pb, win) {
-    if (!pb || win.w < 4) return; var u = pb.t / pb.dur;
-    var rx = pb.side * 8 - pb.side * 16 * smooth(u), ry = pb.y + Math.sin(pb.t * 2.1) * 0.12, rz = pb.depth + Math.sin(pb.t * 1.3) * 0.4;
-    if (rz < 0.6) return; var focal = win.w * 0.5 / Math.tan(1.2 / 2);
-    var sx = win.x + win.w / 2 + (rx / rz) * focal, sy = win.y + win.h / 2 + (ry / rz) * focal, sz = Math.min(win.h * 0.95, (focal * 1.7) / rz);
-    var center = smooth(1 - Math.abs(u - 0.5) * 2), vis = (G.lightOn ? 0.42 : 0.26) * center * (0.55 + G.sanity * 0.45);
-    var big = pb.shape === "mutationKing", rw = sz * (big ? 0.95 : 0.6), rh = sz * (big ? 0.8 : 0.42);
-    ctx.save(); ctx.beginPath(); Art.rrect(ctx, win.x, win.y, win.w, win.h, 10); ctx.clip();
-    var sg = ctx.createRadialGradient(sx, sy, rw * 0.1, sx, sy, rw);
-    sg.addColorStop(0, "rgba(1,3,5," + (0.55 + vis * 0.4).toFixed(2) + ")"); sg.addColorStop(0.7, "rgba(2,5,8," + (0.35 + vis * 0.3).toFixed(2) + ")"); sg.addColorStop(1, "rgba(3,7,10,0)");
-    ctx.fillStyle = sg; ctx.beginPath(); ctx.ellipse(sx, sy, rw, rh, Math.sin(G.time * 0.5) * 0.12, 0, 7); ctx.fill();
-    ctx.fillStyle = "rgba(1,3,5," + (0.3 + vis * 0.25).toFixed(2) + ")"; ctx.beginPath(); ctx.ellipse(sx - pb.side * rw * 0.55, sy + rh * 0.2, rw * (big ? 0.5 : 0.32), rh * 0.5, pb.side * (big ? 1.1 : 1.4), 0, 7); ctx.fill();
-    if (vis > 0.30) { ctx.strokeStyle = "rgba(40,72,74," + ((vis - 0.30) * 0.8).toFixed(2) + ")"; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.ellipse(sx, sy, rw * 0.82, rh * 0.82, 0, -1.1, 0.6); ctx.stroke(); }
-    var mg = ctx.createLinearGradient(win.x, win.y, win.x, win.y + win.h); mg.addColorStop(0, "rgba(4,9,12,0.30)"); mg.addColorStop(0.5, "rgba(4,9,12,0.10)"); mg.addColorStop(1, "rgba(4,9,12,0.34)");
-    ctx.fillStyle = mg; ctx.fillRect(win.x, win.y, win.w, win.h);
+  // a high-pressure LEAK jet on the window glass — the ONLY place a leak's position is visible (look-out view)
+  function drawLeakJet(L0, win) {
+    var lx = win.x + L0.x * win.w, ly = win.y + L0.y * win.h, age = G.time - L0.born, burst = age > CFG.leakBurst;
+    var jet = (burst ? 1.6 : 1) * (0.7 + 0.3 * Math.sin(G.time * 22 + L0.x * 30));
+    ctx.save();
+    ctx.strokeStyle = "rgba(150,210,225,0.5)"; ctx.lineWidth = 2;   // the fracture
+    ctx.beginPath(); ctx.moveTo(lx - 14, ly - 10); ctx.lineTo(lx, ly); ctx.lineTo(lx + 11, ly - 15); ctx.moveTo(lx, ly); ctx.lineTo(lx + 6, ly + 17); ctx.stroke();
+    var grd = ctx.createRadialGradient(lx, ly, 2, lx, ly, 62 * jet);   // the spray
+    grd.addColorStop(0, "rgba(205,232,242," + (0.5 * jet).toFixed(2) + ")"); grd.addColorStop(0.5, "rgba(120,170,190,0.22)"); grd.addColorStop(1, "rgba(120,170,190,0)");
+    ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(lx, ly, 62 * jet, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgba(195,228,238,0.6)";   // droplets streaking inward
+    for (var i = 0; i < 9; i++) { var dph = (G.time * 1.6 + i * 0.5) % 1, dxp = lx + (i - 4) * 5 + Math.sin(i + L0.y) * 6, dyp = ly + dph * 72 * jet; ctx.fillRect(dxp, dyp, 1.6, 7 * jet); }
+    ctx.strokeStyle = burst ? "rgba(255,90,70,0.85)" : "rgba(255,210,120,0.7)"; ctx.lineWidth = 2;   // patch-aim ring
+    ctx.beginPath(); ctx.arc(lx, ly, 22 + Math.sin(G.time * 6) * 3, 0, 7); ctx.stroke();
     ctx.restore();
+  }
+  function drawShutter(ph) { // RADAR view: a sealed blast-shutter over the porthole — no water visible from here
+    if (ph.w < 4) return;
+    ctx.save(); ctx.beginPath(); Art.rrect(ctx, ph.x, ph.y, ph.w, ph.h, 10); ctx.clip();
+    var g = ctx.createLinearGradient(ph.x, ph.y, ph.x, ph.y + ph.h); g.addColorStop(0, "#1a1f26"); g.addColorStop(0.5, "#10141a"); g.addColorStop(1, "#0a0d11");
+    ctx.fillStyle = g; ctx.fillRect(ph.x, ph.y, ph.w, ph.h);
+    var step = Math.max(11, ph.h / 9);
+    for (var sy = ph.y + step; sy < ph.y + ph.h; sy += step) { ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(ph.x, sy); ctx.lineTo(ph.x + ph.w, sy); ctx.stroke();
+      ctx.strokeStyle = "rgba(90,104,120,0.16)"; ctx.beginPath(); ctx.moveTo(ph.x, sy + 1.6); ctx.lineTo(ph.x + ph.w, sy + 1.6); ctx.stroke(); }
+    Art.text(ctx, "ОБЗОР ЗАКРЫТ", ph.x + ph.w / 2, ph.y + ph.h / 2, Math.max(9, ph.h * 0.085), "rgba(150,170,180,0.45)", "center");
+    if (G.leaks.length) { var a = clamp(0.2 + G.leak * 0.5, 0, 0.7);   // water seeps at the sill: you feel a leak, not WHERE
+      var sg = ctx.createLinearGradient(ph.x, ph.y + ph.h, ph.x, ph.y + ph.h - 32); sg.addColorStop(0, "rgba(90,150,170," + a.toFixed(2) + ")"); sg.addColorStop(1, "rgba(90,150,170,0)");
+      ctx.fillStyle = sg; ctx.fillRect(ph.x, ph.y + ph.h - 32, ph.w, 32); }
+    ctx.restore();
+    portholeBezel(ph);
+  }
+  function drawLookOutScene(win) {
+    renderForwardBuffer();
+    ctx.save(); ctx.beginPath(); Art.rrect(ctx, win.x, win.y, win.w, win.h, 14); ctx.clip();
+    ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, win.x, win.y, win.w, win.h);
+    var cg = ctx.createRadialGradient(win.x + win.w / 2, win.y + win.h * 0.42, 10, win.x + win.w / 2, win.y + win.h * 0.5, win.w * 0.7);
+    cg.addColorStop(0, "rgba(40,90,90,0.16)"); cg.addColorStop(1, "rgba(2,6,8,0)"); ctx.fillStyle = cg; ctx.fillRect(win.x, win.y, win.w, win.h);
+    for (var i = 0; i < G.leaks.length; i++) drawLeakJet(G.leaks[i], win);
+    var vg = ctx.createRadialGradient(win.x + win.w / 2, win.y + win.h / 2, Math.min(win.w, win.h) * 0.2, win.x + win.w / 2, win.y + win.h / 2, Math.max(win.w, win.h) * 0.7);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(6,16,20,0.5)"); ctx.fillStyle = vg; ctx.fillRect(win.x, win.y, win.w, win.h);
+    ctx.restore();
+    portholeBezel({ x: win.x + 6, y: win.y + 6, w: win.w - 12, h: win.h - 12 });
   }
 
   function renderDive() {
     layoutStations();
-    // hull shake = a screen-space translate of the WHOLE rigid cabin (never written into look angles)
+    if (G.view === "window") L._grid = null;   // at the glass you cannot read OR tap the radar — split attention
     var sh = OPT.shake ? G.shake : 0, F = 38;
     var shx = sh ? (Math.sin(G.time * F) * 0.6 + (Math.random() - 0.5)) * sh * 0.8 : 0;
     var shy = sh ? (Math.cos(G.time * F * 0.9) * 0.6 + (Math.random() - 0.5)) * sh * 0.8 : 0;
-    var c = G.cam, camYaw = c.yaw + c._swayY, camPitch = c.pitch + c._swayP;
     ctx.save(); ctx.translate(shx, shy);
-    drawTube(camYaw, camPitch);
-    // the WINDOW (look out): the 3D trench buffer composited at the camera-driven porthole, monsters swimming past
-    renderForwardBuffer();
-    var ph = L.porthole;
-    if (ph.w > 4 && ph.h > 4) {
-      ctx.save(); ctx.beginPath(); Art.rrect(ctx, ph.x, ph.y, ph.w, ph.h, 10); ctx.clip();
-      ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, ph.x, ph.y, ph.w, ph.h);
-      if (G.passby) drawPassby(G.passby, ph);
-      ctx.restore();
-      portholeBezel(ph);
+    if (G.view === "window") {
+      drawTube(0, 0.05);
+      drawLookOutScene({ x: L.col.w * 0.2, y: L.top.h, w: W - L.col.w * 0.4, h: H - L.top.h - L.bottom.h * 0.92 });
+    } else {
+      drawTube(0, 0);
+      drawShutter(L.porthole);                          // window is shuttered in radar view
+      drawMonitor();
+      if (L.tank.w > 2) Art.drawOxygenTank(ctx, L.tank.x, L.tank.y, L.tank.w, L.tank.h, G.oxygen / CFG.startOxygen, G.time);
+      if (L.depth.r > 2 && L.depth.cx > -9000) Art.drawDepthGauge(ctx, L.depth.cx, L.depth.cy, L.depth.r, clamp(G.layer / CFG.layers, 0, 1), G.time);
+      var vc = STA.valve.scr;
+      if (vc && vc.visible) { var oc0 = curCell(); Art.drawValveWheel(ctx, vc.sx, vc.sy, STA.valve.rr * STA.valve.mul, { ang: G.valveAngle, t: G.time, lit: 0.85, active: !!(oc0 && (oc0.hatch || oc0.source)) }); }
     }
-    drawMonitor();
-    if (G.lock) drawLock();
-    if (L.tank.w > 2) Art.drawOxygenTank(ctx, L.tank.x, L.tank.y, L.tank.w, L.tank.h, G.oxygen / CFG.startOxygen, G.time);
-    if (L.depth.r > 2 && L.depth.cx > -9000) Art.drawDepthGauge(ctx, L.depth.cx, L.depth.cy, L.depth.r, clamp(G.layer / CFG.layers, 0, 1), G.time);
-    // the crank is a physical valve wheel
-    var vc = STA.valve.scr;
-    if (vc && vc.visible) { var oc0 = curCell(); Art.drawValveWheel(ctx, vc.sx, vc.sy, STA.valve.rr * STA.valve.mul, { ang: G.valveAngle, t: G.time, lit: G.lightOn ? 1 : 0.7, active: !!(oc0 && (oc0.hatch || oc0.source)) }); }
     drawLamps(); drawControls();
-    // first-person hands: left reaches the valve while cranking; right reaches the freshest pressed control
-    (function poseHands() {
-      var h = G.hands, restY = H * 0.95, lipL = W * 0.2, lipR = W * 0.8;
-      var crankAct = Math.abs(G.valveSpin) > 0.05, vc2 = STA.valve.scr;
-      var ltx = (vc2 && vc2.visible) ? vc2.sx : lipL, lty = (vc2 && vc2.visible && crankAct) ? vc2.sy : restY;
-      var rtx = lipR, rty = restY, freshest = -1, pick = null, ids = ["ping", "light", "excavate", "patch", "up", "down", "left", "right", "brief"];
-      for (var i = 0; i < ids.length; i++) { var t0 = UI.pressed[ids[i]]; if (t0 != null && G.time - t0 < 0.45 && t0 > freshest) { freshest = t0; pick = ids[i]; } }
-      if (pick) { var rr = (pick === "up" || pick === "down" || pick === "left" || pick === "right") ? dpadRects()[pick] : L.btn[pick]; if (rr && rr.w > 0) { rtx = rr.x + rr.w / 2; rty = rr.y + rr.h / 2; } }
-      var sp = 0.18; h.lx += (ltx - h.lx) * sp; h.ly += (lty - h.ly) * sp; h.rx += (rtx - h.rx) * sp; h.ry += (rty - h.ry) * sp;
-      h.lR += ((crankAct ? 1 : 0) - h.lR) * sp; h.rR += ((pick ? 1 : 0) - h.rR) * sp;
-      var par = -(G.cam.yaw) * W * 0.10;
-      Art.drawBody(ctx, { t: G.time, w: W, h: H, sanity: G.sanity, par: par * 0.6 }); // seated pilot torso/lap
-      Art.drawHands(ctx, { lx: h.lx + par, ly: h.ly, rx: h.rx + par, ry: h.ry, lReach: h.lR, rReach: h.rR, t: G.time, sanity: G.sanity, restY: restY, w: W });
-    })();
+    poseHands();
     ctx.restore();
-    // jumpscare / reveal / flooding / radio / grain are screen-space (no camera, no shake transform)
-    if (G.scare) drawScare();
-    else if (G.reveal) renderReveal();
+    if (G.detonate) drawDetonation();
     else if (G.descentFx) drawDescentFx();
-    else Art.drawLeak(ctx, W, H, clamp(G.leak, 0, 1), G.time);
-    if (!G.scare && !G.reveal) drawRadioPanel();   // the only dive text — diegetic comms, beneath the CRT grade
-    var pxBase = 1.8 + (1 - G.sanity) * 1.5 + (G.scare ? 1.6 : 0) + (G.reveal ? 1 : 0); // far less pixelated now; coarsens only at low sanity / in a scare
+    else Art.drawLeak(ctx, W, H, clamp(G.leak, 0, 1), G.time);   // cabin flooding overlay
+    var pxBase = 3 + G.pressure * 1.6 + (G.detonate ? 2 : 0);     // scene coarsens WITH depth (text drawn crisp, after)
     Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, flash: G.flash, flashCol: G.flashCol, sanity: G.sanity, time: G.time, glitch: G.glitch, pixel: pxBase });
     if (G.heartbeat > 0.25) { ctx.fillStyle = "rgba(150,20,30," + (G.heartbeat * 0.16).toFixed(3) + ")"; ctx.fillRect(0, 0, W, H); }
+    if (!G.detonate) { drawRadioPanel(); if (G.view === "window") drawLookOutHUD(); }   // crisp comms/HUD over the pixelated frame
+  }
+  function poseHands() {
+    var h = G.hands, win = (G.view === "window");
+    var restY = win ? H * 0.9 : H * 0.95, lipL = W * 0.2, lipR = W * 0.8;
+    var crankAct = Math.abs(G.valveSpin) > 0.05, vc2 = STA.valve.scr, ltx, lty, rtx, rty, lR, rR;
+    if (win) { // both hands up at the glass; the right reaches the patch toward the leak being sealed
+      ltx = W * 0.30; lty = H * 0.66; rtx = W * 0.70; rty = H * 0.66;
+      var pat = UI.pressed["patch"], patching = pat != null && G.time - pat < 0.5 && G.leaks.length;
+      if (patching) { var lk = G.leaks[G.leaks.length - 1]; rtx = lerp(W * 0.3, W * 0.7, lk.x); rty = H * (0.28 + lk.y * 0.42); }
+      lR = 1; rR = patching ? 1 : 0.45;
+    } else {
+      ltx = (vc2 && vc2.visible) ? vc2.sx : lipL; lty = (vc2 && vc2.visible && crankAct) ? vc2.sy : restY;
+      rtx = lipR; rty = restY; var freshest = -1, pick = null, ids = ["ping", "light", "excavate", "patch", "up", "down", "left", "right", "brief"];
+      for (var i = 0; i < ids.length; i++) { var t0 = UI.pressed[ids[i]]; if (t0 != null && G.time - t0 < 0.45 && t0 > freshest) { freshest = t0; pick = ids[i]; } }
+      if (pick) { var rr = (pick === "up" || pick === "down" || pick === "left" || pick === "right") ? dpadRects()[pick] : L.btn[pick]; if (rr && rr.w > 0) { rtx = rr.x + rr.w / 2; rty = rr.y + rr.h / 2; } }
+      lR = crankAct ? 1 : 0; rR = pick ? 1 : 0;
+    }
+    var sp = 0.18; h.lx += (ltx - h.lx) * sp; h.ly += (lty - h.ly) * sp; h.rx += (rtx - h.rx) * sp; h.ry += (rty - h.ry) * sp;
+    h.lR += (lR - h.lR) * sp; h.rR += (rR - h.rR) * sp;
+    Art.drawBody(ctx, { t: G.time, w: W, h: H, sanity: G.sanity });
+    Art.drawHands(ctx, { lx: h.lx, ly: h.ly, rx: h.rx, ry: h.ry, lReach: h.lR, rReach: h.rR, t: G.time, sanity: G.sanity, restY: restY, w: W, grip: G.hands.grip, pressure: G.pressure });
+  }
+  function drawLookOutHUD() {
+    var y0 = clamp(H * 0.11, 38, 78);
+    Art.text(ctx, "ОБЗОР · LOOK-OUT", W * 0.5, y0, clamp(W * 0.02, 13, 20), PAL.bioHi, "center");
+    Art.text(ctx, Math.floor(G.depth) + " М   ДАВЛЕНИЕ " + Math.round(G.pressure * 100) + "%", W * 0.5, y0 + clamp(W * 0.022, 16, 24), clamp(W * 0.015, 10, 15), PAL.amber, "center");
+    var msg = G.leaks.length ? (G.leaks.length + (G.leaks.length > 1 ? " LEAKS" : " LEAK") + " — PATCH (P)") : "hull holding — back to RADAR (Q)";
+    Art.text(ctx, msg, W * 0.5, H - L.bottom.h - 14, clamp(W * 0.016, 11, 16), G.leaks.length ? PAL.bloodHi : PAL.textDim, "center");
   }
   // screen-fixed comms readout (drawn beneath the CRT grade so it reads as a tube)
   function drawRadioPanel() {
@@ -815,7 +762,7 @@
         ctx.beginPath(); ctx.moveTo(mcx - hs, mcy - hs * 0.5); ctx.lineTo(mcx, mcy + hs * 0.6); ctx.lineTo(mcx + hs, mcy - hs * 0.5); ctx.stroke();
         ctx.beginPath(); ctx.arc(mcx, mcy, hs * 0.9, 0, 7); ctx.globalAlpha = 0.4 + 0.3 * Math.sin(G.time * 3); ctx.stroke(); ctx.globalAlpha = 1; } }
     // sub marker (lerp during transit) + facing
-    var scx = G.sub.cx, scy = G.sub.cy; if (G.transit) { scx += G.transit.dx * G.transit.t * (G.transit.isMonster ? 0.5 : 1); scy += G.transit.dy * G.transit.t * (G.transit.isMonster ? 0.5 : 1); }
+    var scx = G.sub.cx, scy = G.sub.cy; if (G.transit) { scx += G.transit.dx * G.transit.t * (G.transit.isMine ? 0.5 : 1); scy += G.transit.dy * G.transit.t * (G.transit.isMine ? 0.5 : 1); }
     var sxp2 = gx + scx * (cellSz + gap) + cellSz / 2, syp2 = gy + scy * (cellSz + gap) + cellSz / 2;
     ctx.save(); Art.glowDot(ctx, sxp2, syp2, cellSz * 0.55, PAL.phosHi, 1);
     ctx.fillStyle = PAL.phosHi; ctx.strokeStyle = "#04120c"; ctx.lineWidth = 1;
@@ -844,11 +791,11 @@
       bx1 = Math.max(L.btn.excavate.x + L.btn.excavate.w, L.btn.patch.x + L.btn.patch.w), by1 = Math.max(L.btn.light.y + L.btn.light.h, L.btn.patch.y + L.btn.patch.h);
       if (bx1 > bx0) Art.consoleHousing(ctx, { x: bx0, y: by0, w: bx1 - bx0, h: by1 - by0 }, { inset: 9 }); }
     for (var i = 0; i < effPings(); i++) { var on = i < G.pings; var dx = pb.x + 8 + i * 12, dy = pb.y - 8; ctx.beginPath(); ctx.arc(dx, dy, 3.5, 0, 7); ctx.fillStyle = on ? PAL.bioHi : "#13201a"; ctx.fill(); ctx.strokeStyle = PAL.phosLo; ctx.lineWidth = 1; ctx.stroke(); }
-    Art.button(ctx, pb, "PING", { primary: G.pingFlash > 0.4, hover: UI.hover === "ping", disabled: G.pings <= 0, depth: btnDepth("ping") });
-    Art.button(ctx, L.btn.light, "✦ FLASH", { primary: G.flare > 0.25, hover: UI.hover === "light", depth: btnDepth("light") });
-    var narrow = L.btn.excavate.w < 88;
-    Art.button(ctx, L.btn.excavate, G.lock ? "LOCK!" : (narrow ? "SIG" : "SECURE"), { primary: G.lock || G.onLoot, hover: UI.hover === "excavate", disabled: !G.lock && !G.onLoot, depth: btnDepth("excavate") });
-    Art.button(ctx, L.btn.patch, (narrow ? "FIX " : "PATCH ") + G.patches, { hover: UI.hover === "patch", disabled: G.patches <= 0 || G.hull >= effMaxHull(), depth: btnDepth("patch") });
+    var radar = G.view === "radar", win = !radar, narrow = L.btn.excavate.w < 88;
+    Art.button(ctx, pb, "PING", { primary: G.pingFlash > 0.4, hover: UI.hover === "ping", disabled: !radar || G.pings <= 0, depth: btnDepth("ping") });
+    Art.button(ctx, L.btn.light, win ? "▣ RADAR" : "◉ LOOK", { primary: win, hover: UI.hover === "light", depth: btnDepth("light") });
+    Art.button(ctx, L.btn.excavate, narrow ? "FLAG" : "FLAG ⚑", { hover: UI.hover === "excavate", disabled: !radar, depth: btnDepth("excavate") });
+    Art.button(ctx, L.btn.patch, "PATCH", { primary: win && G.leaks.length > 0, hover: UI.hover === "patch", disabled: !win || G.leaks.length === 0, depth: btnDepth("patch") });
     // crank is the diegetic VALVE WHEEL (drawn in renderDive); no flat crank button here.
     Art.button(ctx, L.btn.brief, "?", { hover: UI.hover === "brief", depth: btnDepth("brief") });
     var d = dpadRects();
@@ -857,107 +804,79 @@
     Art.button(ctx, d.left, "◄", { hover: UI.hover === "left", depth: btnDepth("left") }); Art.button(ctx, d.right, "►", { hover: UI.hover === "right", depth: btnDepth("right") });
   }
 
-  function drawLock() { // radar mini-game: catch the warship-jammed signal in the capture window
-    var m = L.monitor, lk = G.lock, cx = m.x + m.w / 2, cy = m.y + m.h / 2, R = Math.min(m.w, m.h) * 0.32;
-    ctx.save(); ctx.beginPath(); Art.rrect(ctx, m.x, m.y, m.w, m.h, 6); ctx.clip();
-    ctx.fillStyle = "rgba(2,9,7,0.85)"; ctx.fillRect(m.x, m.y, m.w, m.h);
-    ctx.strokeStyle = PAL.phosDim; ctx.lineWidth = 1; for (var ring = 1; ring <= 3; ring++) { ctx.beginPath(); ctx.arc(cx, cy, R * ring / 3, 0, 7); ctx.stroke(); }
-    var w = Math.max(0.22, 0.55 - lk.hits * 0.05);
-    ctx.fillStyle = "rgba(120,255,210,0.18)"; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, -Math.PI / 2 - w, -Math.PI / 2 + w); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = PAL.phosHi; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, R, -Math.PI / 2 - w, -Math.PI / 2 + w); ctx.stroke();
-    ctx.strokeStyle = "rgba(224,163,46,0.4)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy, R, lk.ang - lk.dir * 0.7, lk.ang); ctx.stroke();
-    var bx = cx + Math.cos(lk.ang) * R, by = cy + Math.sin(lk.ang) * R;
-    Art.glowDot(ctx, bx, by, R * 0.18, PAL.amberHi, 1); ctx.fillStyle = PAL.amberHi; ctx.beginPath(); ctx.arc(bx, by, Math.max(3, R * 0.08), 0, 7); ctx.fill();
-    for (var h = 0; h < lk.need; h++) { var px = cx - (lk.need - 1) * 8 + h * 16, py = cy + R * 0.55; ctx.beginPath(); ctx.arc(px, py, 5, 0, 7); ctx.fillStyle = h < lk.hits ? PAL.bioHi : "#1a2a22"; ctx.fill(); ctx.strokeStyle = PAL.phosLo; ctx.lineWidth = 1; ctx.stroke(); }
-    var tleft = clamp((lk.until - G.time) / 9.5, 0, 1);
-    ctx.strokeStyle = tleft < 0.3 ? PAL.bloodHi : PAL.bio; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, cy, R + 9, -Math.PI / 2, -Math.PI / 2 + tleft * Math.PI * 2); ctx.stroke();
-    ctx.restore();
-  }
-
-  // the strike NEVER shows the creature — pure suggestion: cut, shake, the glass cracking,
-  // a 1-2 frame shadow that eclipses the light, the headlight guttering, blood-dark water.
-  function drawScare() {
-    var sc = G.scare, dur = Math.max(0.3, sc.until - sc.t0), k = clamp((G.time - sc.t0) / dur, 0, 1);
-    var seed = (sc.t0 * 1000) | 0;
+  // a MINE goes off: white-hot bloom, rupture shake, glass shatter, then the cabin floods black. No creature.
+  function drawDetonation() {
+    var dt = G.detonate, dur = Math.max(0.3, dt.until - dt.t0), k = clamp((G.time - dt.t0) / dur, 0, 1);
+    var seed = (dt.t0 * 1000) | 0;
     function nz(i) { var s = (seed ^ (i * 2654435761)) >>> 0; s = Math.imul(s ^ (s >>> 15), 1 | s); s = (s + Math.imul(s ^ (s >>> 7), 61 | s)) ^ s; return ((s ^ (s >>> 14)) >>> 0) / 4294967296; }
-    // (1) hard cut to black + a guttering headlight (mostly dark, brief strobes)
-    ctx.fillStyle = "#010305"; ctx.fillRect(0, 0, W, H);
-    if (k < 0.70 && Math.sin(G.time * 47) * Math.sin(G.time * 13) > 0.55) { var gg = ctx.createRadialGradient(W / 2, H * 0.55, 0, W / 2, H * 0.55, Math.max(W, H) * 0.6);
-      gg.addColorStop(0, "rgba(60,52,30,0.55)"); gg.addColorStop(1, "rgba(0,0,0,0)"); ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H); }
-    // (2) violent shake on everything below, decaying after k>0.55
-    var shk = (1 - clamp(k / 0.55, 0, 1)) * 26, jx = (Math.random() - 0.5) * shk, jy = (Math.random() - 0.5) * shk;
+    ctx.fillStyle = "#020305"; ctx.fillRect(0, 0, W, H);
+    // (1) white-hot blast bloom from the detonation point, fast falloff
+    if (k < 0.4) { var bk = 1 - k / 0.4, bg = ctx.createRadialGradient(W / 2, H * 0.5, 0, W / 2, H * 0.5, Math.max(W, H) * (0.3 + k));
+      bg.addColorStop(0, "rgba(255,235,180," + (0.95 * bk).toFixed(2) + ")"); bg.addColorStop(0.4, "rgba(255,150,60," + (0.6 * bk).toFixed(2) + ")"); bg.addColorStop(1, "rgba(40,10,4,0)");
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H); }
+    // (2) violent rupture shake
+    var shk = (1 - clamp(k / 0.55, 0, 1)) * 30, jx = (Math.random() - 0.5) * shk, jy = (Math.random() - 0.5) * shk;
     ctx.save(); ctx.translate(jx, jy);
-    // (3) the glass CRACKS — white fractures spider from a fixed impact point, grow with k
-    if (k > 0.06) {
-      var grow = clamp((k - 0.06) / 0.24, 0, 1), ix = W * (0.32 + nz(0) * 0.36), iy = H * (0.30 + nz(1) * 0.34);
-      ctx.save(); ctx.globalAlpha = clamp(1 - (k - 0.45) / 0.45, 0, 1); ctx.strokeStyle = "rgba(225,238,242,0.85)"; ctx.lineJoin = "round";
-      for (var a = 0; a < 7; a++) { var ang = a / 7 * Math.PI * 2 + nz(a + 5) * 0.8, len = (Math.max(W, H) * (0.18 + nz(a + 9) * 0.34)) * grow;
-        ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(ix, iy);
-        for (var sgi = 1; sgi <= 4; sgi++) { var f = sgi / 4; ctx.lineTo(ix + Math.cos(ang + (nz(a * 9 + sgi) - 0.5) * 0.7) * len * f, iy + Math.sin(ang + (nz(a * 9 + sgi + 1) - 0.5) * 0.7) * len * f); }
+    // (3) the glass SHATTERS — white fractures spider out, grow with k
+    if (k > 0.04) {
+      var grow = clamp((k - 0.04) / 0.22, 0, 1), ix = W * (0.5 + (nz(0) - 0.5) * 0.2), iy = H * (0.46 + (nz(1) - 0.5) * 0.2);
+      ctx.save(); ctx.globalAlpha = clamp(1 - (k - 0.5) / 0.45, 0, 1); ctx.strokeStyle = "rgba(228,240,244,0.9)"; ctx.lineJoin = "round";
+      for (var a = 0; a < 9; a++) { var ang = a / 9 * Math.PI * 2 + nz(a + 5) * 0.6, len = (Math.max(W, H) * (0.2 + nz(a + 9) * 0.4)) * grow;
+        ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(ix, iy);
+        for (var sgi = 1; sgi <= 4; sgi++) { var f = sgi / 4; ctx.lineTo(ix + Math.cos(ang + (nz(a * 9 + sgi) - 0.5) * 0.6) * len * f, iy + Math.sin(ang + (nz(a * 9 + sgi + 1) - 0.5) * 0.6) * len * f); }
         ctx.stroke(); }
-      ctx.fillStyle = "rgba(235,245,248," + (0.6 * grow).toFixed(2) + ")"; ctx.beginPath(); ctx.arc(ix, iy, 3 + grow * 5, 0, 7); ctx.fill(); ctx.restore();
-    }
-    // (4) NO creature — a colossal SHADOW surges across the glass and blots out the light (suggestion only)
-    if (k > 0.30) {
-      var fk = clamp((k - 0.30) / 0.30, 0, 1), hold = clamp(1 - (k - 0.82) / 0.18, 0, 1), fr = Math.max(W, H) * (0.6 + fk * 0.7);
-      var sx2 = W * (0.5 + (nz(2) - 0.5) * 0.5) - fr * 0.3 + fk * fr * 0.5, sy2 = H * (0.5 + (nz(3) - 0.5) * 0.3);
-      ctx.save(); ctx.globalAlpha = hold; Art.drawShadowMass(ctx, sx2, sy2, fr, { t: G.time, lit: 0.35 + fk * 0.4, elong: 1.5 }); ctx.restore();
-    } else if (Math.sin(G.time * 90) > 0.86) {
-      var ex = W * (0.40 + nz(2) * 0.20), ey = H * (0.44 + nz(3) * 0.16), er = Math.max(W, H) * (0.55 + nz(4) * 0.25);
-      var sg = ctx.createRadialGradient(ex, ey, er * 0.15, ex, ey, er); sg.addColorStop(0, "rgba(0,0,0,0.98)"); sg.addColorStop(0.82, "rgba(2,5,8,0.92)"); sg.addColorStop(1, "rgba(2,5,8,0)");
-      ctx.fillStyle = sg; ctx.beginPath(); ctx.ellipse(ex, ey, er, er * 0.78, nz(6) * 0.4 - 0.2, 0, 7); ctx.fill();
+      ctx.restore();
     }
     ctx.restore(); // end shake
-    // (5) blood-dark water floods up from the bottom and fills the frame
-    if (k > 0.28) { var fk = clamp((k - 0.28) / 0.72, 0, 1), fy = H - H * (0.20 + fk * 1.05);
-      var fg = ctx.createLinearGradient(0, fy, 0, H); fg.addColorStop(0, "rgba(40,6,8," + (0.35 + fk * 0.4).toFixed(2) + ")"); fg.addColorStop(1, "rgba(8,2,3," + (0.7 + fk * 0.3).toFixed(2) + ")");
+    // (4) black water floods up and swallows the frame
+    if (k > 0.22) { var fk = clamp((k - 0.22) / 0.78, 0, 1), fy = H - H * (0.18 + fk * 1.1);
+      var fg = ctx.createLinearGradient(0, fy, 0, H); fg.addColorStop(0, "rgba(6,12,16," + (0.4 + fk * 0.4).toFixed(2) + ")"); fg.addColorStop(1, "rgba(1,3,5," + (0.8 + fk * 0.2).toFixed(2) + ")");
       ctx.fillStyle = fg; ctx.beginPath(); ctx.moveTo(0, fy); for (var x2 = 0; x2 <= W; x2 += W / 14) ctx.lineTo(x2, fy + Math.sin(x2 * 0.02 + G.time * 3) * (6 + fk * 6)); ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill(); }
-    // (6) opening white-hot retina bloom (first ~2 frames)
-    if (k < 0.06) { ctx.fillStyle = "rgba(240,245,248," + (0.85 * (1 - k / 0.06)).toFixed(2) + ")"; ctx.fillRect(0, 0, W, H); }
-    // (7) red alarm vignette pulse, and (8) settle to near-black at the tail
-    var ap = 0.5 + 0.5 * Math.sin(G.time * 11);
-    var vg2 = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.max(W, H) * 0.72);
-    vg2.addColorStop(0, "rgba(0,0,0,0)"); vg2.addColorStop(1, "rgba(140,16,22," + (0.22 + ap * 0.16 * (1 - k * 0.3)).toFixed(3) + ")");
-    ctx.fillStyle = vg2; ctx.fillRect(0, 0, W, H);
-    if (k > 0.7) { ctx.fillStyle = "rgba(1,3,5," + (((k - 0.7) / 0.3) * 0.7).toFixed(2) + ")"; ctx.fillRect(0, 0, W, H); }
+    if (k > 0.6) { ctx.fillStyle = "rgba(1,3,5," + (((k - 0.6) / 0.4) * 0.85).toFixed(2) + ")"; ctx.fillRect(0, 0, W, H); }
   }
 
   // ---------------- title / help / options / end ----------------
   function renderSceneBackground() { var bw = buf.width, bh = buf.height; bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.clearRect(0, 0, bw, bh); Art.drawTitle(bctx, bw, bh, G ? G.time : 0); ctx.imageSmoothingEnabled = false; ctx.drawImage(buf, 0, 0, W, H); }
   function renderTitle() {
     renderSceneBackground();
+    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, time: G.time, glitch: (G.time < 1.4 ? 0.6 : 0), pixel: 2.6 }); // pixelate the backdrop; UI stays crisp on top
     Art.drawTitleStamp(ctx, W, H, G.time); // Cyrillic stencil + recorder OSD + boot flicker
     Art.wrapText(ctx, S.tagline, W / 2, H * 0.37, clamp(W * 0.5, 280, 640), clamp(W * 0.016, 10, 16), PAL.textDim);
     UI.menu = []; var bw = clamp(W * 0.4, 220, 340), bh = clamp(H * 0.075, 44, 62), bx = (W - bw) / 2, by = H * 0.52, gap = 14;
     var labels = [[S.menu_dive, "dive", true], [S.menu_help, "help", false], [S.menu_options, "options", false]];
     for (var i = 0; i < labels.length; i++) { var r = { x: bx, y: by + i * (bh + gap), w: bw, h: bh }; Art.button(ctx, r, labels[i][0], { primary: labels[i][2], hover: UI.hover === "m" + i || (G.padActive && G.menuSel === i) }); UI.menu.push({ r: r, act: labels[i][1] }); }
-    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, time: G.time, glitch: (G.time < 1.4 ? 0.6 : 0), pixel: 2 }); // power-on tearing
   }
   function renderHelp() {
-    renderSceneBackground(); var x = clamp(W * 0.08, 18, 180), y = clamp(H * 0.07, 30, 90), w = W - x * 2;
+    renderSceneBackground();
+    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, time: G.time, pixel: 2.6 });
+    var x = clamp(W * 0.08, 18, 180), y = clamp(H * 0.07, 30, 90), w = W - x * 2;
     Art.text(ctx, S.help_title, W / 2, y, clamp(W * 0.045, 22, 40), PAL.phosHi, "center");
     var fs = clamp(W * 0.015, 11, 15), yy = y + fs * 2.2;
     for (var i = 0; i < S.help_lines.length; i++) yy += Art.wrapText(ctx, "• " + S.help_lines[i], W / 2, yy, w, fs, PAL.text) * (fs + 4) + 5;
     yy += 6; Art.wrapText(ctx, S.help_controls, W / 2, yy, w, fs * 0.92, PAL.amber);
-    UI.backBtn = { x: W / 2 - 90, y: H - clamp(H * 0.11, 54, 100), w: 180, h: 46 }; Art.button(ctx, UI.backBtn, S.menu_back, { hover: UI.hover === "back" }); Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
+    UI.backBtn = { x: W / 2 - 90, y: H - clamp(H * 0.11, 54, 100), w: 180, h: 46 }; Art.button(ctx, UI.backBtn, S.menu_back, { hover: UI.hover === "back" });
   }
   function renderOptions() {
-    renderSceneBackground(); var y = clamp(H * 0.16, 50, 140); Art.text(ctx, S.options_title, W / 2, y, clamp(W * 0.05, 24, 44), PAL.phosHi, "center");
+    renderSceneBackground();
+    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, time: G.time, pixel: 2.6 });
+    var y = clamp(H * 0.16, 50, 140); Art.text(ctx, S.options_title, W / 2, y, clamp(W * 0.05, 24, 44), PAL.phosHi, "center");
     var rows = [[S.opt_sound, "sound"], [S.opt_shake, "shake"], [S.opt_scanlines, "scanlines"]]; UI.optHit = [];
     var rw = clamp(W * 0.6, 280, 460), rx = (W - rw) / 2, rh = 54, ry = y + 40;
     for (var i = 0; i < rows.length; i++) { var r = { x: rx, y: ry + i * (rh + 12), w: rw, h: rh }; ctx.fillStyle = "rgba(10,14,20,0.5)"; Art.rrect(ctx, r.x, r.y, r.w, r.h, 6); ctx.fill(); ctx.strokeStyle = "rgba(90,100,114,0.5)"; Art.rrect(ctx, r.x, r.y, r.w, r.h, 6); ctx.stroke();
       Art.text(ctx, rows[i][0], r.x + 14, r.y + r.h / 2 + 6, 16, PAL.text, "left"); var on = OPT[rows[i][1]], tr = { x: r.x + r.w - 86, y: r.y + 11, w: 72, h: 32 }; Art.button(ctx, tr, on ? S.opt_on : S.opt_off, { primary: on }); UI.optHit.push({ r: tr, key: rows[i][1] }); }
-    UI.backBtn = { x: W / 2 - 90, y: ry + rows.length * (rh + 12) + 16, w: 180, h: 48 }; Art.button(ctx, UI.backBtn, S.menu_back, { hover: UI.hover === "back" }); Art.overlay(ctx, W, H, { scanlines: OPT.scanlines });
+    UI.backBtn = { x: W / 2 - 90, y: ry + rows.length * (rh + 12) + 16, w: 180, h: 48 }; Art.button(ctx, UI.backBtn, S.menu_back, { hover: UI.hover === "back" });
   }
   function renderEnd() {
-    renderSceneBackground(); ctx.fillStyle = "rgba(2,4,8,0.78)"; ctx.fillRect(0, 0, W, H);
-    var win = G.won, title = win ? S.win_title : G.endKind === "hull" ? S.lose_hull : S.lose_oxygen, body = win ? S.win_body : G.endKind === "hull" ? S.lose_hull_body : S.lose_oxygen_body;
+    renderSceneBackground(); ctx.fillStyle = "rgba(2,4,8,0.8)"; ctx.fillRect(0, 0, W, H);
+    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, time: G.time, glitch: G.won ? 0 : 0.3, pixel: 2.6 }); // pixelate the backdrop; text stays crisp on top
+    var win = G.won;
+    var title = win ? S.win_title : G.endKind === "hull" ? S.lose_hull : G.endKind === "mine" ? S.lose_mine : S.lose_oxygen;
+    var body = win ? S.win_body : G.endKind === "hull" ? S.lose_hull_body : G.endKind === "mine" ? S.lose_mine_body : S.lose_oxygen_body;
     var y = clamp(H * 0.2, 70, 190); Art.text(ctx, title, W / 2, y, clamp(W * 0.06, 28, 56), win ? PAL.bioHi : PAL.bloodHi, "center");
     Art.wrapText(ctx, body, W / 2, y + clamp(W * 0.05, 34, 56), clamp(W * 0.7, 280, 720), clamp(W * 0.018, 13, 19), PAL.text);
     Art.text(ctx, fmt(S.end_depth, { d: Math.floor(G.depth) }), W / 2, y + clamp(W * 0.05, 34, 56) + 104, 14, PAL.amber, "center");
     UI.contBtn = { x: W / 2 - 120, y: H - clamp(H * 0.16, 84, 140), w: 240, h: 52 }; Art.button(ctx, UI.contBtn, S.again, { primary: true, hover: UI.hover === "cont" });
     drawRadioPanel(); // Sergey's last words land on the comms readout
-    Art.overlay(ctx, W, H, { scanlines: OPT.scanlines, time: G.time, glitch: win ? 0 : 0.3, pixel: 2.3 });
   }
 
   // ---------------- input ----------------
@@ -969,7 +888,7 @@
   function pushDir(dx, dy) { for (var i = heldDirs.length - 1; i >= 0; i--) if (heldDirs[i].dx === dx && heldDirs[i].dy === dy) heldDirs.splice(i, 1); heldDirs.push({ dx: dx, dy: dy }); }
   function popDir(dx, dy) { for (var i = heldDirs.length - 1; i >= 0; i--) if (heldDirs[i].dx === dx && heldDirs[i].dy === dy) heldDirs.splice(i, 1); }
   function clearDirs() { heldDirs.length = 0; padHeld = null; }
-  function pumpHeldDrive() { if (!heldDirs.length || G.scene !== "dive" || G.transit || G.scare || G.lock || G.reveal || G.descentFx) return; var d = heldDirs[heldDirs.length - 1]; tryDrive(d.dx, d.dy); }
+  function pumpHeldDrive() { if (!heldDirs.length || G.scene !== "dive" || G.view !== "radar" || G.transit || G.detonate || G.descentFx) return; var d = heldDirs[heldDirs.length - 1]; tryDrive(d.dx, d.dy); }
   function dpadDirAt(p) { var d = dpadRects(); if (inside(d.up, p)) return [0, -1]; if (inside(d.down, p)) return [0, 1]; if (inside(d.left, p)) return [-1, 0]; if (inside(d.right, p)) return [1, 0]; return null; }
   function pt(e) { var rect = canvas.getBoundingClientRect(); var s = e.touches && e.touches[0] ? e.touches[0] : (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e; return { x: s.clientX - rect.left, y: s.clientY - rect.top }; }
   function gridCellAt(p) { if (!L._grid) return null; var g = L._grid; var cx = Math.floor((p.x - g.gx) / (g.cell + g.gap)), cy = Math.floor((p.y - g.gy) / (g.cell + g.gap)); if (cx < 0 || cy < 0 || cx >= G.gw || cy >= G.gh) return null; return { x: cx, y: cy }; }
@@ -984,17 +903,15 @@
   }
   function onDiveDown(p) {
     G.idleT = 0; // any cabin interaction breaks the "idle" tutorial/whisper timer
-    if (G.lock) { lockAttempt(); return; } // mini-game has focus: any tap fires a lock
-    if (inside(L.btn.ping, p)) { ping(); return; }
-    if (inside(L.btn.light, p)) { toggleLight(); return; }
-    if (inside(L.btn.excavate, p)) { secure(); return; }
+    if (inside(L.btn.light, p)) { toggleLight(); return; }   // LOOK OUT / RADAR toggle works in both views
     if (inside(L.btn.patch, p)) { patch(); return; }
+    if (inside(L.btn.ping, p)) { ping(); return; }
+    if (inside(L.btn.excavate, p)) { flagFaced(); return; }
     if (inside(L.btn.crank, p)) { crank(); return; }
     if (inside(L.btn.brief, p)) { UI.overlay = "help"; return; }
     var pd = dpadDirAt(p);
-    if (pd) { padHeld = pd; pushDir(pd[0], pd[1]); if (!G.transit && !G.scare && !G.lock) tryDrive(pd[0], pd[1]); return; } // press-and-hold = continuous drive
-    // tap a grid cell: adjacent -> drive into it; (hold handled separately -> flag)
-    var gc = gridCellAt(p);
+    if (pd) { padHeld = pd; pushDir(pd[0], pd[1]); if (!G.transit && !G.detonate) tryDrive(pd[0], pd[1]); return; } // press-and-hold = continuous drive
+    var gc = gridCellAt(p);   // tap a grid cell: adjacent -> drive into it (only meaningful in radar view; L._grid is null at the glass)
     if (gc) { var ddx = gc.x - G.sub.cx, ddy = gc.y - G.sub.cy; if (Math.abs(ddx) + Math.abs(ddy) === 1) tryDrive(ddx, ddy); }
   }
   function onHover(p) { UI.hover = null; if (!G) return;
@@ -1013,8 +930,8 @@
     var d = dpadRects(); for (var k in d) if (inside(d[k], p)) return true;
     return false;
   }
-  function applyLook(dx, dy) { var c = G.cam; c.tgtYaw = clamp(c.tgtYaw - dx * 0.0026, -0.62, 0.62); c.tgtPitch = clamp(c.tgtPitch - dy * 0.0026, -0.34, 0.40); c.active = 1; c.lastLook = G.time; G.idleT = 0; }
-  function canLook(p) { return G && G.scene === "dive" && !UI.overlay && !G.lock && !G.scare && !G.reveal && !G.descentFx && !overControl(p) && !gridCellAt(p); }
+  function applyLook(dx, dy) {} // FIXED camera now — drag never pans the view
+  function canLook(p) { return false; } // no free-look; the camera is fixed (toggle RADAR/WINDOW instead)
 
   canvas.addEventListener("mousedown", function (e) { var p = pt(e); drag.down = true; drag.lx = p.x; drag.ly = p.y; drag.moved = 0;
     if (canLook(p)) drag.look = true; else { drag.look = false; onDown(p); } });
@@ -1050,12 +967,10 @@
     if (UI.overlay) { if (code === "Escape" || code === "Enter" || code === "Space" || code === "KeyH") { UI.overlay = null; e.preventDefault(); } return; }
     if (code === "KeyH") { UI.overlay = "help"; e.preventDefault(); return; }
     if (G.scene === "dive") {
-      if (G.lock) { if (code === "Space" || code === "Enter") { lockAttempt(); e.preventDefault(); } else if (code === "Escape") { lockFail(); e.preventDefault(); } return; }
-      if (DIR_OF[code]) { if (!e.repeat) { var dd = DIR_OF[code]; pushDir(dd[0], dd[1]); G.idleT = 0; if (!G.transit && !G.scare && !G.lock) tryDrive(dd[0], dd[1]); } e.preventDefault(); }
+      if (DIR_OF[code]) { if (!e.repeat) { var dd = DIR_OF[code]; pushDir(dd[0], dd[1]); G.idleT = 0; if (!G.transit && !G.detonate) tryDrive(dd[0], dd[1]); } e.preventDefault(); }
       else if (code === "Space") { ping(); e.preventDefault(); }
       else if (code === "KeyF") { flagFaced(); e.preventDefault(); }
-      else if (code === "KeyL") { toggleLight(); e.preventDefault(); }
-      else if (code === "KeyE") { secure(); e.preventDefault(); }
+      else if (code === "KeyL" || code === "KeyQ") { toggleLight(); e.preventDefault(); } // LOOK OUT / RADAR toggle
       else if (code === "KeyC") { crank(); e.preventDefault(); }
       else if (code === "KeyP") { patch(); e.preventDefault(); }
       else if (code === "Escape") { UI.overlay = "options"; }
@@ -1073,16 +988,9 @@
       function pressed(i) { return b[i] && b[i].pressed && !padPrev[i]; }
       if (UI.overlay) { if (pressed(0) || pressed(1) || pressed(9)) UI.overlay = null; }
       else if (G.scene === "dive") {
-        if (G.lock) { if (pressed(0)) lockAttempt(); if (pressed(1)) lockFail(); }
-        else {
-          if (pressed(12) || (ax[1] < -0.5 && !padPrev._u)) tryDrive(0, -1); if (pressed(13) || (ax[1] > 0.5 && !padPrev._d)) tryDrive(0, 1);
-          if (pressed(14) || (ax[0] < -0.5 && !padPrev._l)) tryDrive(-1, 0); if (pressed(15) || (ax[0] > 0.5 && !padPrev._r)) tryDrive(1, 0);
-          if (pressed(0)) ping(); if (pressed(2)) flagFaced(); if (pressed(1)) toggleLight(); if (pressed(3)) secure(); if (pressed(4)) patch(); if (pressed(5)) crank(); if (pressed(9)) UI.overlay = "help";
-          // right stick = look around the cabin
-          var rxx = ax[2] || 0, ryy = ax[3] || 0;
-          if (Math.abs(rxx) > 0.14) { G.cam.tgtYaw = clamp(G.cam.tgtYaw + rxx * 2.4 * STEP / 1000, -0.62, 0.62); G.cam.active = 1; G.cam.lastLook = G.time; }
-          if (Math.abs(ryy) > 0.14) { G.cam.tgtPitch = clamp(G.cam.tgtPitch + ryy * 2.0 * STEP / 1000, -0.34, 0.40); G.cam.active = 1; G.cam.lastLook = G.time; }
-        }
+        if (pressed(12) || (ax[1] < -0.5 && !padPrev._u)) tryDrive(0, -1); if (pressed(13) || (ax[1] > 0.5 && !padPrev._d)) tryDrive(0, 1);
+        if (pressed(14) || (ax[0] < -0.5 && !padPrev._l)) tryDrive(-1, 0); if (pressed(15) || (ax[0] > 0.5 && !padPrev._r)) tryDrive(1, 0);
+        if (pressed(0)) ping(); if (pressed(2)) flagFaced(); if (pressed(1) || pressed(6) || pressed(7)) toggleLight(); if (pressed(4)) patch(); if (pressed(5)) crank(); if (pressed(9)) UI.overlay = "help";
         padPrev._u = ax[1] < -0.5; padPrev._d = ax[1] > 0.5; padPrev._l = ax[0] < -0.5; padPrev._r = ax[0] > 0.5;
       } else if (G.scene === "intro") { if (pressed(0) || pressed(9) || pressed(1)) cineSkip(); }
       else if (G.scene === "end") { if (pressed(0) || pressed(9)) beginIntro(); }
@@ -1106,5 +1014,5 @@
   }
 
   newRun(randomSeed()); resize(); requestAnimationFrame(frame);
-  window.DREADNOUGHT = { G: function () { return G; }, newRun: newRun, startRun: startRun, drive: tryDrive, ping: ping, flagFaced: flagFaced, toggleLight: toggleLight, secure: secure, lockAttempt: lockAttempt, patch: patch, crank: crank, moveAnglers: moveAnglers, descend: descend, radioQueue: radioQueue, OPT: OPT };
+  window.DREADNOUGHT = { G: function () { return G; }, newRun: newRun, startRun: startRun, drive: tryDrive, ping: ping, flagFaced: flagFaced, toggleView: toggleView, toggleLight: toggleLight, patch: patch, crank: crank, moveAnglers: moveAnglers, descend: descend, spawnLeak: spawnLeak, radioQueue: radioQueue, OPT: OPT };
 })();
